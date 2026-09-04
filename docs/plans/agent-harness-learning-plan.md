@@ -101,9 +101,9 @@ agent-harness/
 
 ### Step 03 — Configuration loading
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-03-configuration-loading`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/3
 - **Concept:** Agent behavior depends on explicit model/provider configuration.
 - **Functionality:**
   - Add config package.
