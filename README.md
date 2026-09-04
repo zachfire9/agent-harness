@@ -39,6 +39,18 @@ Prompt: What is an agent?
 
 This step only structures the prompt locally; it does not call an LLM yet.
 
+## Configuration
+
+Step 03 adds configuration loading for future model calls. Copy `.env.example` or set these environment variables directly:
+
+```powershell
+$env:OPENAI_API_KEY="your-api-key-here"
+$env:OPENAI_BASE_URL="https://api.openai.com/v1"
+$env:OPENAI_MODEL="gpt-4.1-mini"
+```
+
+Only `OPENAI_API_KEY` is required by the config loader. `OPENAI_BASE_URL` and `OPENAI_MODEL` have defaults.
+
 ## Test
 
 ```powershell
