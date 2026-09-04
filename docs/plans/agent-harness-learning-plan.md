@@ -8,6 +8,7 @@
 - After this initial plan commit, every implementation step happens on its own branch.
 - Branch naming format: `step-NN-short-description`, for example `step-01-go-cli-foundation`.
 - Every step gets a GitHub pull request before it is merged into `main`.
+- PR title format: `Step N: Short step description`, for example `Step 1: Go CLI foundation`.
 - Each PR should explain:
   - what concept the step teaches
   - what code changed
