@@ -25,6 +25,20 @@ Expected output:
 agent-harness: staged learning CLI ready
 ```
 
+Ask command skeleton:
+
+```powershell
+go run ./cmd/agent-harness ask "What is an agent?"
+```
+
+Expected output:
+
+```text
+Prompt: What is an agent?
+```
+
+This step only structures the prompt locally; it does not call an LLM yet.
+
 ## Test
 
 ```powershell
