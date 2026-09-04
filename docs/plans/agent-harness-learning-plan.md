@@ -82,9 +82,9 @@ agent-harness/
 
 ### Step 02 — `ask` command skeleton
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-02-ask-command-skeleton`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/2
 - **Concept:** Separate CLI input handling from model/agent execution.
 - **Functionality:**
   - Support `agent-harness ask "What is an agent?"`.
