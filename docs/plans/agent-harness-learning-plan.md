@@ -16,7 +16,7 @@
   - how it was verified
 - Zach reviews/approves/merges PRs before the next step is based on `main`.
 - After a PR is created, add the PR link to that step in this plan.
-- After a PR is merged, mark the step completed in this plan.
+- On the step branch, mark that step as completed once the step's implementation and tests are done so it will show as completed when the PR is merged into `main`.
 - Updating the plan status/PR links should be part of the relevant step branch/PR unless Zach asks for a separate docs-only update.
 
 ## Testing standard
@@ -63,7 +63,7 @@ agent-harness/
 
 ### Step 01 — Go CLI foundation
 
-- **Status:** In review
+- **Status:** Completed
 - **Branch:** `step-01-go-cli-foundation`
 - **Pull Request:** https://github.com/zachfire9/agent-harness/pull/1
 - **Concept:** A runnable Go project starts with a thin CLI entrypoint and testable internal logic.
