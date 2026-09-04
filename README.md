@@ -39,6 +39,54 @@ Prompt: What is an agent?
 
 This step only structures the prompt locally; it does not call an LLM yet.
 
+## Configuration
+
+Step 03 adds configuration loading for future model calls. The app loads config from:
+
+1. Process environment variables, when they are set.
+2. A local `.env` file in the current working directory.
+3. Built-in defaults for optional values.
+
+Process environment variables take precedence over values in `.env`. Only `OPENAI_API_KEY` is required. `OPENAI_BASE_URL` and `OPENAI_MODEL` have defaults.
+
+### Create an OpenAI API key
+
+Your ChatGPT Plus subscription does not cover API usage. API requests are billed separately through the OpenAI Platform.
+
+1. Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+2. Sign in or create an OpenAI Platform account.
+3. Create a new secret key.
+4. Copy the key once and store it in your local `.env` file.
+5. In the Platform billing/settings area, add billing and set a usage limit before making real model calls.
+
+Do not commit API keys, tokens, passwords, or real connection strings.
+
+### Local `.env` file
+
+Create your local config by copying the committed example file:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Then edit `.env` and replace the placeholder API key:
+
+```text
+OPENAI_API_KEY=your-openai-api-key-here
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+`.env` is listed in `.gitignore`, so local secrets stay out of git. `.env.example` is safe to commit because it contains placeholders only.
+
+You can also set values directly in PowerShell instead of using `.env`:
+
+```powershell
+$env:OPENAI_API_KEY="your-openai-api-key-here"
+$env:OPENAI_BASE_URL="https://api.openai.com/v1"
+$env:OPENAI_MODEL="gpt-4.1-mini"
+```
+
 ## Test
 
 ```powershell

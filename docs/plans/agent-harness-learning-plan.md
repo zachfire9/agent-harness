@@ -101,22 +101,25 @@ agent-harness/
 
 ### Step 03 — Configuration loading
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-03-configuration-loading`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/3
 - **Concept:** Agent behavior depends on explicit model/provider configuration.
 - **Functionality:**
   - Add config package.
-  - Read model settings from environment variables:
+  - Read model settings from process environment variables and an optional local `.env` file:
     - `OPENAI_API_KEY`
     - `OPENAI_BASE_URL`
     - `OPENAI_MODEL`
-  - Add `.env.example`.
+  - Keep `.env` ignored by git and commit `.env.example` with placeholders only.
+  - Let process environment variables override `.env` values.
   - Fail clearly when required config is missing.
 - **Tests:**
   - Missing API key returns a clear error.
   - Defaults are applied for base URL/model if defaults are chosen.
   - Explicit env values override defaults.
+  - Local `.env` values are loaded when process environment variables are absent.
+  - Process environment variables override local `.env` values.
   - API key is not printed or exposed in normal config output.
 - **Verification:**
   - `go test ./...`
