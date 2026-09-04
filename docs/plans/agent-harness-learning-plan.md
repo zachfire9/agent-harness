@@ -62,9 +62,9 @@ agent-harness/
 
 ### Step 01 — Go CLI foundation
 
-- **Status:** Pending
+- **Status:** In review
 - **Branch:** `step-01-go-cli-foundation`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/1
 - **Concept:** A runnable Go project starts with a thin CLI entrypoint and testable internal logic.
 - **Functionality:**
   - Initialize the Go module.
