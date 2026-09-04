@@ -1,0 +1,13 @@
+# Binaries built by `go build`
+/bin/
+/dist/
+
+# Go workspace/cache artifacts
+*.test
+coverage.out
+
+# Local env/config files
+.env
+
+# Local agent run artifacts for future steps
+.agent-harness/
