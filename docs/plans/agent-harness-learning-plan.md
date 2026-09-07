@@ -166,9 +166,9 @@ agent-harness/
 
 ### Step 06 — Agent message orchestration
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-06-agent-message-orchestration`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/6
 - **Concept:** Agents maintain state by appending messages to a conversation history.
 - **Functionality:**
   - Add `internal/agent` package.
