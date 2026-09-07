@@ -52,7 +52,7 @@ func TestRunAskCommandPrintsAgentAnswer(t *testing.T) {
 	if fake.request.Messages[0].Role != llm.RoleSystem || !strings.Contains(fake.request.Messages[0].Content, "helpful CLI assistant") {
 		t.Fatalf("expected agent system message, got %#v", fake.request.Messages[0])
 	}
-	if fake.request.Messages[1] != (llm.Message{Role: llm.RoleUser, Content: "What is an agent?"}) {
+	if fake.request.Messages[1].Role != llm.RoleUser || fake.request.Messages[1].Content != "What is an agent?" {
 		t.Fatalf("expected user prompt message, got %#v", fake.request.Messages[1])
 	}
 }

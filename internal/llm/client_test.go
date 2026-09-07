@@ -3,6 +3,7 @@ package llm_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/zachfire9/agent-harness/internal/llm"
@@ -49,7 +50,7 @@ func TestNewChatRequestPreservesMessageOrdering(t *testing.T) {
 
 	for i, want := range messages {
 		got := request.Messages[i]
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("message %d: expected %#v, got %#v", i, want, got)
 		}
 	}

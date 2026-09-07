@@ -7,15 +7,21 @@ import (
 	"strings"
 
 	"github.com/zachfire9/agent-harness/internal/llm"
+	"github.com/zachfire9/agent-harness/internal/tools"
 )
 
-const defaultSystemPrompt = "You are a helpful CLI assistant. Answer clearly and concisely."
+const (
+	defaultSystemPrompt = "You are a helpful CLI assistant. Answer clearly and concisely."
+	defaultMaxSteps     = 8
+)
 
-// Runner orchestrates one non-tool agent turn.
+// Runner orchestrates an agent turn, including model-requested tool calls.
 type Runner struct {
 	chatClient   llm.ChatClient
 	model        string
 	systemPrompt string
+	tools        tools.Registry
+	maxSteps     int
 }
 
 // Result contains the final answer and complete message history for a run.
@@ -24,16 +30,26 @@ type Result struct {
 	Messages []llm.Message
 }
 
-// New creates a runner with the default system prompt.
+// New creates a runner with the default system prompt and no tools.
 func New(chatClient llm.ChatClient, model string) Runner {
 	return Runner{
 		chatClient:   chatClient,
 		model:        model,
 		systemPrompt: defaultSystemPrompt,
+		tools:        tools.NewRegistry(),
+		maxSteps:     defaultMaxSteps,
 	}
 }
 
-// Run builds initial message history, calls the chat client once, and appends the assistant response.
+// NewWithTools creates a runner with the default system prompt and a tool registry.
+func NewWithTools(chatClient llm.ChatClient, model string, registry tools.Registry) Runner {
+	runner := New(chatClient, model)
+	runner.tools = registry
+	return runner
+}
+
+// Run builds message history, calls the model, executes requested tools, and
+// repeats until the model returns a final answer or the step limit is reached.
 func (r Runner) Run(ctx context.Context, prompt string) (Result, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
@@ -42,20 +58,71 @@ func (r Runner) Run(ctx context.Context, prompt string) (Result, error) {
 	if r.chatClient == nil {
 		return Result{}, errors.New("chat client is required")
 	}
+	if r.maxSteps <= 0 {
+		r.maxSteps = defaultMaxSteps
+	}
 
 	messages := []llm.Message{
 		{Role: llm.RoleSystem, Content: r.systemPrompt},
 		{Role: llm.RoleUser, Content: prompt},
 	}
+	toolSpecs := toolSpecsFromRegistry(r.tools)
 
-	response, err := r.chatClient.Chat(ctx, llm.NewChatRequest(r.model, messages...))
-	if err != nil {
-		return Result{}, fmt.Errorf("chat failed: %w", err)
+	for step := 0; step < r.maxSteps; step++ {
+		request := llm.NewChatRequest(r.model, messages...)
+		request.Tools = toolSpecs
+
+		response, err := r.chatClient.Chat(ctx, request)
+		if err != nil {
+			return Result{}, fmt.Errorf("chat failed: %w", err)
+		}
+
+		assistantMessage := response.Message
+		assistantMessage.ToolCalls = response.ToolCalls
+		messages = append(messages, assistantMessage)
+
+		if response.IsFinalAnswer() {
+			return Result{
+				Answer:   response.Message.Content,
+				Messages: messages,
+			}, nil
+		}
+
+		for _, toolCall := range response.ToolCalls {
+			tool, err := r.tools.Require(toolCall.Name)
+			if err != nil {
+				return Result{}, err
+			}
+
+			toolResult, err := tool.Execute(ctx, toolCall.Arguments)
+			if err != nil {
+				return Result{}, fmt.Errorf("tool %s failed: %w", toolCall.Name, err)
+			}
+
+			messages = append(messages, llm.Message{
+				Role:       llm.RoleTool,
+				Content:    toolResult,
+				ToolCallID: toolCall.ID,
+			})
+		}
 	}
 
-	messages = append(messages, response.Message)
-	return Result{
-		Answer:   response.Message.Content,
-		Messages: messages,
-	}, nil
+	return Result{}, fmt.Errorf("max agent steps exceeded: %d", r.maxSteps)
+}
+
+func toolSpecsFromRegistry(registry tools.Registry) []llm.ToolSpec {
+	metadata := registry.Metadata()
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	specs := make([]llm.ToolSpec, 0, len(metadata))
+	for _, item := range metadata {
+		specs = append(specs, llm.ToolSpec{
+			Name:        item.Name,
+			Description: item.Description,
+			Schema:      item.Schema,
+		})
+	}
+	return specs
 }

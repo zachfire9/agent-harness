@@ -263,7 +263,7 @@ agent-harness/
 
 ### Step 11 — First agent loop with tool execution
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-11-agent-loop-tool-execution`
 - **Pull Request:** TBD
 - **Concept:** The core agent loop is model call -> tool execution -> observation -> repeat -> final answer.

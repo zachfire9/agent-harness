@@ -71,7 +71,12 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 
-	runner := agent.New(a.chatClient, a.model)
+	registry, err := builtInTools()
+	if err != nil {
+		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
+		return 1
+	}
+	runner := agent.NewWithTools(a.chatClient, a.model, registry)
 	result, err := runner.Run(context.Background(), prompt)
 	if err != nil {
 		fmt.Fprintf(stderr, "ask failed: %v\n", err)
