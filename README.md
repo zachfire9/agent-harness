@@ -12,7 +12,8 @@ The project currently has:
 - testable CLI package under `internal/cli`
 - `ask` command skeleton that formats prompts locally
 - config loading from process environment variables or a local `.env` file
-- minimal LLM package under `internal/llm` with message types, chat client interface, and fake client for deterministic tests
+- minimal LLM package under `internal/llm` with message types, chat client interface, fake client, and OpenAI-compatible chat/completions client
+- `ask` wired to send a system + user message to the configured model and print the assistant response
 
 ## Run
 
@@ -26,19 +27,19 @@ Expected output:
 agent-harness: staged learning CLI ready
 ```
 
-Ask command skeleton:
+Ask with the configured model:
 
 ```powershell
 go run ./cmd/agent-harness ask "What is an agent?"
 ```
 
-Expected output:
+Expected output is the assistant response from your configured OpenAI-compatible model, for example:
 
 ```text
-Prompt: What is an agent?
+An agent is a program that uses a model to decide what to do next, optionally call tools, and continue until it can return a final answer.
 ```
 
-This step only structures the prompt locally; it does not call an LLM yet.
+If config is missing, the command fails before making a model call and prints a helpful config error.
 
 ## Configuration
 
