@@ -205,9 +205,9 @@ agent-harness/
 
 ### Step 08 — Echo demo tool
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-08-echo-demo-tool`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/8
 - **Concept:** Tool execution should be independently testable before involving the LLM.
 - **Functionality:**
   - Add an `echo` tool that accepts a JSON message and returns it.
