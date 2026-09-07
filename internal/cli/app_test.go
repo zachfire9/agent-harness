@@ -28,7 +28,7 @@ func TestRunDefaultInvocationPrintsPlaceholder(t *testing.T) {
 	}
 }
 
-func TestRunAskCommandPrintsAssistantResponse(t *testing.T) {
+func TestRunAskCommandPrintsAgentAnswer(t *testing.T) {
 	fake := &recordingChatClient{
 		response: llm.ChatResponse{Message: llm.Message{Role: llm.RoleAssistant, Content: "Agents are loops around model calls."}},
 	}
@@ -38,7 +38,7 @@ func TestRunAskCommandPrintsAssistantResponse(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
 	}
 	if stdout != "Agents are loops around model calls.\n" {
-		t.Fatalf("expected assistant response, got %q", stdout)
+		t.Fatalf("expected agent answer, got %q", stdout)
 	}
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
@@ -47,10 +47,10 @@ func TestRunAskCommandPrintsAssistantResponse(t *testing.T) {
 		t.Fatalf("expected configured model, got %q", fake.request.Model)
 	}
 	if len(fake.request.Messages) != 2 {
-		t.Fatalf("expected system and user messages, got %#v", fake.request.Messages)
+		t.Fatalf("expected agent to send system and user messages, got %#v", fake.request.Messages)
 	}
 	if fake.request.Messages[0].Role != llm.RoleSystem || !strings.Contains(fake.request.Messages[0].Content, "helpful CLI assistant") {
-		t.Fatalf("expected helpful system message, got %#v", fake.request.Messages[0])
+		t.Fatalf("expected agent system message, got %#v", fake.request.Messages[0])
 	}
 	if fake.request.Messages[1] != (llm.Message{Role: llm.RoleUser, Content: "What is an agent?"}) {
 		t.Fatalf("expected user prompt message, got %#v", fake.request.Messages[1])
@@ -73,7 +73,7 @@ func TestRunAskCommandRequiresPrompt(t *testing.T) {
 	}
 }
 
-func TestRunAskCommandReturnsModelError(t *testing.T) {
+func TestRunAskCommandReturnsAgentError(t *testing.T) {
 	fake := &recordingChatClient{err: errors.New("model unavailable")}
 	stdout, stderr, exitCode := runApp(fake, "gpt-test", "agent-harness", "ask", "What is an agent?")
 
@@ -83,8 +83,8 @@ func TestRunAskCommandReturnsModelError(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected empty stdout, got %q", stdout)
 	}
-	if !strings.Contains(stderr, "ask failed: model unavailable") {
-		t.Fatalf("expected helpful model error, got %q", stderr)
+	if !strings.Contains(stderr, "ask failed: chat failed: model unavailable") {
+		t.Fatalf("expected helpful agent error, got %q", stderr)
 	}
 }
 

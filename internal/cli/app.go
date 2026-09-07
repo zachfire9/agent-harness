@@ -6,14 +6,12 @@ import (
 	"io"
 	"strings"
 
+	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/config"
 	"github.com/zachfire9/agent-harness/internal/llm"
 )
 
-const (
-	defaultMessage = "agent-harness: staged learning CLI ready"
-	systemPrompt   = "You are a helpful CLI assistant. Answer clearly and concisely."
-)
+const defaultMessage = "agent-harness: staged learning CLI ready"
 
 // App holds command dependencies so CLI behavior can be tested without real API calls.
 type App struct {
@@ -69,15 +67,13 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 
-	response, err := a.chatClient.Chat(context.Background(), llm.NewChatRequest(a.model,
-		llm.Message{Role: llm.RoleSystem, Content: systemPrompt},
-		llm.Message{Role: llm.RoleUser, Content: prompt},
-	))
+	runner := agent.New(a.chatClient, a.model)
+	result, err := runner.Run(context.Background(), prompt)
 	if err != nil {
 		fmt.Fprintf(stderr, "ask failed: %v\n", err)
 		return 1
 	}
 
-	fmt.Fprintln(stdout, response.Message.Content)
+	fmt.Fprintln(stdout, result.Answer)
 	return 0
 }
