@@ -146,9 +146,9 @@ agent-harness/
 
 ### Step 05 — OpenAI-compatible chat call
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-05-openai-compatible-chat-call`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/5
 - **Concept:** A non-tool agent begins as a structured chat request to a model API.
 - **Functionality:**
   - Implement an OpenAI-compatible chat/completions client.
