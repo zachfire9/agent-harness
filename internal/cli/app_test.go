@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -199,6 +201,99 @@ func TestRunChatCommandAllowsToolCallsInsideTurn(t *testing.T) {
 	}
 }
 
+func TestRunAskCommandSendsWorkspaceFileToolsToModel(t *testing.T) {
+	fake := &recordingChatClient{
+		response: llm.ChatResponse{Message: llm.Message{Role: llm.RoleAssistant, Content: "ok"}},
+	}
+	stdout, stderr, exitCode := runApp(fake, "gpt-test", "agent-harness", "ask", "What files are here?")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stdout: %s; stderr: %s", exitCode, stdout, stderr)
+	}
+	toolNames := map[string]bool{}
+	for _, tool := range fake.request.Tools {
+		toolNames[tool.Name] = true
+	}
+	for _, want := range []string{"echo", "list_files", "read_file", "search_files"} {
+		if !toolNames[want] {
+			t.Fatalf("expected model request to include %s tool metadata, got %#v", want, fake.request.Tools)
+		}
+	}
+}
+
+func TestRunToolCommandExecutesListFilesTool(t *testing.T) {
+	root := t.TempDir()
+	writeCLITestFile(t, root, "README.md", "hello")
+	writeCLITestFile(t, root, "docs/intro.txt", "intro")
+	t.Chdir(root)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "list_files", `{"path":"."}`)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "README.md") || !strings.Contains(stdout, "docs/intro.txt") {
+		t.Fatalf("expected listed workspace files, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+}
+
+func TestRunToolCommandExecutesReadFileTool(t *testing.T) {
+	root := t.TempDir()
+	writeCLITestFile(t, root, "docs/intro.txt", "hello workspace")
+	t.Chdir(root)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "read_file", `{"path":"docs/intro.txt"}`)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stdout != "hello workspace\n" {
+		t.Fatalf("expected file output, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+}
+
+func TestRunToolCommandExecutesSearchFilesTool(t *testing.T) {
+	root := t.TempDir()
+	writeCLITestFile(t, root, "README.md", "agent harness")
+	writeCLITestFile(t, root, "notes.txt", "nothing")
+	t.Chdir(root)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "search_files", `{"query":"agent","path":"."}`)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "README.md: agent harness") || strings.Contains(stdout, "notes.txt") {
+		t.Fatalf("expected only matching search output, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+}
+
+func TestRunToolCommandRejectsWorkspaceEscape(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "read_file", `{"path":"../outside.txt"}`)
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code for path outside workspace")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "path escapes workspace") {
+		t.Fatalf("expected workspace escape error, got %q", stderr)
+	}
+}
+
 func TestRunToolCommandExecutesEchoTool(t *testing.T) {
 	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "echo", `{"message":"hi"}`)
 
@@ -324,6 +419,17 @@ func runAppWithInput(client llm.ChatClient, model string, input string, args ...
 	exitCode = app.Run(args, &stdoutBuffer, &stderrBuffer)
 
 	return stdoutBuffer.String(), stderrBuffer.String(), exitCode
+}
+
+func writeCLITestFile(t *testing.T, root string, relativePath string, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
 }
 
 type recordingChatClient struct {

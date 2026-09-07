@@ -187,8 +187,19 @@ func (a App) runTool(args []string, stdout io.Writer, stderr io.Writer) int {
 
 func builtInTools() (tools.Registry, error) {
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewEchoTool()); err != nil {
-		return tools.Registry{}, err
+	workspaceRoot, err := os.Getwd()
+	if err != nil {
+		return tools.Registry{}, fmt.Errorf("resolve workspace root: %w", err)
+	}
+	for _, tool := range []tools.Tool{
+		tools.NewEchoTool(),
+		tools.NewListFilesTool(workspaceRoot, 0),
+		tools.NewReadFileTool(workspaceRoot, 0),
+		tools.NewSearchFilesTool(workspaceRoot, 0),
+	} {
+		if err := registry.Register(tool); err != nil {
+			return tools.Registry{}, err
+		}
 	}
 	return registry, nil
 }
