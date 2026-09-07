@@ -309,7 +309,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-13-workspace-file-tools`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/13
 - **Concept:** Useful tools need sandboxing, output limits, and predictable errors.
 - **Functionality:**
   - Add `list_files(path)`.
