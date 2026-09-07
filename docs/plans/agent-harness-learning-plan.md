@@ -284,7 +284,7 @@ agent-harness/
 
 ### Step 12 — Interactive chat mode
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-12-interactive-chat-mode`
 - **Pull Request:** TBD
 - **Concept:** Interactive agents preserve conversation history across user turns, while each turn can still use the existing agent/tool loop internally.

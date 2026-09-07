@@ -18,6 +18,7 @@ The project currently has:
 - `echo` demo tool for deterministic tool-execution tests
 - `tool` debug command for manually executing registered tools without an LLM/API call
 - `ask` wired through the agent runner to print the assistant response
+- `chat` command for an in-memory interactive conversation that preserves history across turns while still allowing tool calls inside each turn
 
 ## Run
 
@@ -44,6 +45,25 @@ An agent is a program that uses a model to decide what to do next, optionally ca
 ```
 
 If config is missing, the command fails before making a model call and prints a helpful config error.
+
+Start an interactive chat session with the configured model:
+
+```powershell
+go run ./cmd/agent-harness chat
+```
+
+Example session:
+
+```text
+You: What is an agent?
+Agent: An agent is a program that uses a model to decide what to do next, optionally call tools, and continue until it can return a final answer.
+You: Can you give a simpler example?
+Agent: A simple agent might answer a question, call a calculator tool if math is needed, then use that result in its final answer.
+You: /exit
+Goodbye.
+```
+
+The first chat implementation keeps history only in memory for the lifetime of the process. Use `/exit`, `exit`, `quit`, or EOF to end the session.
 
 Debug a registered tool without making a model/API call:
 

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/zachfire9/agent-harness/internal/agent"
@@ -19,16 +21,22 @@ const defaultMessage = "agent-harness: staged learning CLI ready"
 type App struct {
 	chatClient llm.ChatClient
 	model      string
+	stdin      io.Reader
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
 func NewApp(chatClient llm.ChatClient, model string) App {
-	return App{chatClient: chatClient, model: model}
+	return App{chatClient: chatClient, model: model, stdin: os.Stdin}
+}
+
+// NewAppWithInput creates a CLI app with an injected chat client, model, and input stream.
+func NewAppWithInput(chatClient llm.ChatClient, model string, stdin io.Reader) App {
+	return App{chatClient: chatClient, model: model, stdin: stdin}
 }
 
 // Run executes the agent-harness command and returns a process-style exit code.
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
-	if len(args) <= 1 || args[1] != "ask" || strings.TrimSpace(strings.Join(args[2:], " ")) == "" {
+	if len(args) <= 1 || (args[1] != "ask" && args[1] != "chat") || (args[1] == "ask" && strings.TrimSpace(strings.Join(args[2:], " ")) == "") {
 		return App{}.Run(args, stdout, stderr)
 	}
 
@@ -52,6 +60,8 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	switch args[1] {
 	case "ask":
 		return a.runAsk(args[2:], stdout, stderr)
+	case "chat":
+		return a.runChat(stdout, stderr)
 	case "tool":
 		return a.runTool(args[2:], stdout, stderr)
 	default:
@@ -85,6 +95,65 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 
 	fmt.Fprintln(stdout, result.Answer)
 	return 0
+}
+
+func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
+	if a.chatClient == nil {
+		fmt.Fprintln(stderr, "chat requires a chat client")
+		return 1
+	}
+
+	stdin := a.stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	registry, err := builtInTools()
+	if err != nil {
+		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
+		return 1
+	}
+	runner := agent.NewWithTools(a.chatClient, a.model, registry)
+	scanner := bufio.NewScanner(stdin)
+	var history []llm.Message
+
+	for {
+		fmt.Fprint(stdout, "You: ")
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				fmt.Fprintf(stderr, "chat input failed: %v\n", err)
+				return 1
+			}
+			fmt.Fprintln(stdout, "Goodbye.")
+			return 0
+		}
+
+		prompt := strings.TrimSpace(scanner.Text())
+		if shouldExitChat(prompt) {
+			fmt.Fprintln(stdout, "Goodbye.")
+			return 0
+		}
+		if prompt == "" {
+			continue
+		}
+
+		result, err := runner.RunWithHistory(context.Background(), history, prompt)
+		if err != nil {
+			fmt.Fprintf(stderr, "chat turn failed: %v\n", err)
+			continue
+		}
+
+		history = result.Messages
+		fmt.Fprintf(stdout, "Agent: %s\n", result.Answer)
+	}
+}
+
+func shouldExitChat(input string) bool {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "/exit", "exit", "quit":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a App) runTool(args []string, stdout io.Writer, stderr io.Writer) int {

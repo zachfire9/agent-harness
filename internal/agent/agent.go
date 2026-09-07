@@ -51,6 +51,13 @@ func NewWithTools(chatClient llm.ChatClient, model string, registry tools.Regist
 // Run builds message history, calls the model, executes requested tools, and
 // repeats until the model returns a final answer or the step limit is reached.
 func (r Runner) Run(ctx context.Context, prompt string) (Result, error) {
+	return r.RunWithHistory(ctx, nil, prompt)
+}
+
+// RunWithHistory appends a new user prompt to existing conversation history,
+// then runs the same model/tool loop used by Run. It returns the complete
+// updated history when the turn succeeds.
+func (r Runner) RunWithHistory(ctx context.Context, history []llm.Message, prompt string) (Result, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return Result{}, errors.New("prompt is required")
@@ -62,10 +69,11 @@ func (r Runner) Run(ctx context.Context, prompt string) (Result, error) {
 		r.maxSteps = defaultMaxSteps
 	}
 
-	messages := []llm.Message{
-		{Role: llm.RoleSystem, Content: r.systemPrompt},
-		{Role: llm.RoleUser, Content: prompt},
+	messages := append([]llm.Message(nil), history...)
+	if len(messages) == 0 {
+		messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: r.systemPrompt})
 	}
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: prompt})
 	toolSpecs := toolSpecsFromRegistry(r.tools)
 
 	for step := 0; step < r.maxSteps; step++ {

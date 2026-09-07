@@ -126,6 +126,47 @@ func TestRunExecutesRequestedToolAndSendsResultBackToModel(t *testing.T) {
 	}
 }
 
+func TestRunWithHistoryIncludesEarlierConversationOnNextTurn(t *testing.T) {
+	client := &recordingClient{
+		responses: []llm.ChatResponse{
+			{Message: llm.Message{Role: llm.RoleAssistant, Content: "Agents use loops."}},
+			{Message: llm.Message{Role: llm.RoleAssistant, Content: "A simpler example is a helper that can use tools."}},
+		},
+	}
+	runner := agent.New(client, "gpt-test")
+
+	first, err := runner.Run(context.Background(), "What is an agent?")
+	if err != nil {
+		t.Fatalf("first Run returned error: %v", err)
+	}
+	second, err := runner.RunWithHistory(context.Background(), first.Messages, "Can you give a simpler example?")
+	if err != nil {
+		t.Fatalf("RunWithHistory returned error: %v", err)
+	}
+
+	if second.Answer != "A simpler example is a helper that can use tools." {
+		t.Fatalf("expected second answer, got %q", second.Answer)
+	}
+	if len(client.requests) != 2 {
+		t.Fatalf("expected two model requests, got %d", len(client.requests))
+	}
+	secondRequestMessages := client.requests[1].Messages
+	want := []llm.Message{
+		{Role: llm.RoleSystem, Content: "You are a helpful CLI assistant. Answer clearly and concisely."},
+		{Role: llm.RoleUser, Content: "What is an agent?"},
+		{Role: llm.RoleAssistant, Content: "Agents use loops."},
+		{Role: llm.RoleUser, Content: "Can you give a simpler example?"},
+	}
+	if len(secondRequestMessages) != len(want) {
+		t.Fatalf("expected history plus next user prompt, got %#v", secondRequestMessages)
+	}
+	for i := range want {
+		if secondRequestMessages[i].Role != want[i].Role || secondRequestMessages[i].Content != want[i].Content {
+			t.Fatalf("message %d mismatch: want %#v, got %#v", i, want[i], secondRequestMessages[i])
+		}
+	}
+}
+
 func TestRunStopsAtMaxStepLimit(t *testing.T) {
 	client := &recordingClient{
 		defaultResponse: llm.ChatResponse{
