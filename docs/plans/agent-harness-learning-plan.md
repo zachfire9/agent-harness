@@ -286,7 +286,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-12-interactive-chat-mode`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/12
 - **Concept:** Interactive agents preserve conversation history across user turns, while each turn can still use the existing agent/tool loop internally.
 - **Functionality:**
   - Add `agent-harness chat`.
