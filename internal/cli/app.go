@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/config"
 	"github.com/zachfire9/agent-harness/internal/llm"
+	"github.com/zachfire9/agent-harness/internal/tools"
 )
 
 const defaultMessage = "agent-harness: staged learning CLI ready"
@@ -50,6 +52,8 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	switch args[1] {
 	case "ask":
 		return a.runAsk(args[2:], stdout, stderr)
+	case "tool":
+		return a.runTool(args[2:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[1])
 		return 1
@@ -76,4 +80,41 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 
 	fmt.Fprintln(stdout, result.Answer)
 	return 0
+}
+
+func (a App) runTool(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) < 2 || strings.TrimSpace(args[0]) == "" || strings.TrimSpace(strings.Join(args[1:], " ")) == "" {
+		fmt.Fprintln(stderr, "tool requires a tool name and JSON args")
+		return 1
+	}
+
+	registry, err := builtInTools()
+	if err != nil {
+		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
+		return 1
+	}
+
+	tool, err := registry.Require(args[0])
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+
+	argsJSON := strings.Join(args[1:], " ")
+	result, err := tool.Execute(context.Background(), json.RawMessage(argsJSON))
+	if err != nil {
+		fmt.Fprintf(stderr, "tool failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintln(stdout, result)
+	return 0
+}
+
+func builtInTools() (tools.Registry, error) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewEchoTool()); err != nil {
+		return tools.Registry{}, err
+	}
+	return registry, nil
 }
