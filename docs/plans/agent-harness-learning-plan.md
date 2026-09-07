@@ -211,7 +211,6 @@ agent-harness/
 - **Concept:** Tool execution should be independently testable before involving the LLM.
 - **Functionality:**
   - Add an `echo` tool that accepts a JSON message and returns it.
-  - Optionally add a direct internal/CLI execution path for debugging tools.
 - **Tests:**
   - Valid args return expected echo output.
   - Invalid JSON returns a clear error.
@@ -220,10 +219,33 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 09 — Tool-call response parsing
+### Step 09 — Manual tool debug command
 
 - **Status:** Pending
-- **Branch:** `step-09-tool-call-response-parsing`
+- **Branch:** `step-09-manual-tool-debug-command`
+- **Pull Request:** TBD
+- **Concept:** The harness should be able to execute registered tools directly before the LLM drives them.
+- **Functionality:**
+  - Add `agent-harness tool <tool-name> <json-args>`.
+  - Build the same built-in tool registry that the agent loop will use later.
+  - Look up the requested tool by name and execute it with raw JSON args.
+  - Print successful tool output to stdout.
+  - Print controlled errors for unknown tools, missing args, invalid JSON, and tool execution failures.
+  - Keep this path LLM-free so tools can be debugged without model calls or API keys.
+- **Tests:**
+  - `tool echo {"message":"hi"}` prints `hi`.
+  - Missing tool name returns a clear usage error.
+  - Unknown tool returns a controlled error.
+  - Invalid JSON returns a clear error before or during tool execution.
+  - Tool execution errors return a clear non-zero CLI result.
+- **Verification:**
+  - `go test ./...`
+  - Manual example: `agent-harness tool echo '{"message":"hello from tool debug"}'`
+
+### Step 10 — Tool-call response parsing
+
+- **Status:** Pending
+- **Branch:** `step-10-tool-call-response-parsing`
 - **Pull Request:** TBD
 - **Concept:** The model requests tools; the harness parses those requests and remains in control.
 - **Functionality:**
@@ -239,10 +261,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 10 — First agent loop with tool execution
+### Step 11 — First agent loop with tool execution
 
 - **Status:** Pending
-- **Branch:** `step-10-agent-loop-tool-execution`
+- **Branch:** `step-11-agent-loop-tool-execution`
 - **Pull Request:** TBD
 - **Concept:** The core agent loop is model call -> tool execution -> observation -> repeat -> final answer.
 - **Functionality:**
@@ -260,10 +282,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 11 — Workspace-safe file tools
+### Step 12 — Workspace-safe file tools
 
 - **Status:** Pending
-- **Branch:** `step-11-workspace-file-tools`
+- **Branch:** `step-12-workspace-file-tools`
 - **Pull Request:** TBD
 - **Concept:** Useful tools need sandboxing, output limits, and predictable errors.
 - **Functionality:**
@@ -284,10 +306,10 @@ agent-harness/
   - `go test ./...`
   - Manual example: `agent-harness ask "What files are in this project?"`
 
-### Step 12 — Context window management
+### Step 13 — Context window management
 
 - **Status:** Pending
-- **Branch:** `step-12-context-window-management`
+- **Branch:** `step-13-context-window-management`
 - **Pull Request:** TBD
 - **Concept:** Stored run history and model context are different; agents need token-aware rules for deciding what gets sent back to the model.
 - **Functionality:**
@@ -306,10 +328,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 13 — Trace output for agent steps
+### Step 14 — Trace output for agent steps
 
 - **Status:** Pending
-- **Branch:** `step-13-trace-output`
+- **Branch:** `step-14-trace-output`
 - **Pull Request:** TBD
 - **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context trimming decisions.
 - **Functionality:**
@@ -327,10 +349,10 @@ agent-harness/
   - `go test ./...`
   - Manual example: `agent-harness ask --trace "Summarize this repo"`
 
-### Step 14 — Run/session logging
+### Step 15 — Run/session logging
 
 - **Status:** Pending
-- **Branch:** `step-14-run-session-logging`
+- **Branch:** `step-15-run-session-logging`
 - **Pull Request:** TBD
 - **Concept:** Agent runs should be inspectable after the fact without forcing every stored detail back into model context.
 - **Functionality:**
@@ -346,10 +368,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 15 — Interactive chat mode
+### Step 16 — Interactive chat mode
 
 - **Status:** Pending
-- **Branch:** `step-15-interactive-chat-mode`
+- **Branch:** `step-16-interactive-chat-mode`
 - **Pull Request:** TBD
 - **Concept:** A different interface can reuse the same agent runtime while relying on context-window management to control token growth.
 - **Functionality:**
@@ -366,10 +388,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 16 — Gated command execution tool
+### Step 17 — Gated command execution tool
 
 - **Status:** Pending
-- **Branch:** `step-16-gated-command-tool`
+- **Branch:** `step-17-gated-command-tool`
 - **Pull Request:** TBD
 - **Concept:** Dangerous tools require policy, confirmation, and timeouts.
 - **Functionality:**
@@ -391,10 +413,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 17 — Provider/config polish
+### Step 18 — Provider/config polish
 
 - **Status:** Pending
-- **Branch:** `step-17-provider-config-polish`
+- **Branch:** `step-18-provider-config-polish`
 - **Pull Request:** TBD
 - **Concept:** Provider flexibility should be explicit and easy to verify.
 - **Functionality:**
@@ -413,10 +435,10 @@ agent-harness/
   - `go test ./...`
   - `agent-harness config check`
 
-### Step 18 — Learning walkthrough documentation
+### Step 19 — Learning walkthrough documentation
 
 - **Status:** Pending
-- **Branch:** `step-18-learning-walkthrough-docs`
+- **Branch:** `step-19-learning-walkthrough-docs`
 - **Pull Request:** TBD
 - **Concept:** The repo should be both a working app and a learning artifact.
 - **Functionality:**
