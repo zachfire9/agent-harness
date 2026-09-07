@@ -265,7 +265,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-11-agent-loop-tool-execution`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/11
 - **Concept:** The core agent loop is model call -> tool execution -> observation -> repeat -> final answer.
 - **Functionality:**
   - Send messages to the model.
