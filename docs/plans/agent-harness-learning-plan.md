@@ -221,9 +221,9 @@ agent-harness/
 
 ### Step 09 — Manual tool debug command
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-09-manual-tool-debug-command`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/9
 - **Concept:** The harness should be able to execute registered tools directly before the LLM drives them.
 - **Functionality:**
   - Add `agent-harness tool <tool-name> <json-args>`.
