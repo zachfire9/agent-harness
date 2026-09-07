@@ -244,9 +244,9 @@ agent-harness/
 
 ### Step 10 — Tool-call response parsing
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-10-tool-call-response-parsing`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/10
 - **Concept:** The model requests tools; the harness parses those requests and remains in control.
 - **Functionality:**
   - Parse OpenAI-compatible tool-call responses.

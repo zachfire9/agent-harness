@@ -1,6 +1,9 @@
 package llm
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Role identifies who produced a chat message.
 type Role string
@@ -24,9 +27,23 @@ type ChatRequest struct {
 	Messages []Message
 }
 
+// ToolCall is a model-requested function/tool invocation.
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments json.RawMessage
+}
+
 // ChatResponse contains the assistant message returned by a chat client.
 type ChatResponse struct {
-	Message Message
+	Message   Message
+	ToolCalls []ToolCall
+}
+
+// IsFinalAnswer reports whether the response is an assistant text answer rather
+// than a request for the harness to execute tools.
+func (r ChatResponse) IsFinalAnswer() bool {
+	return len(r.ToolCalls) == 0
 }
 
 // ChatClient is the minimal interface the agent runtime needs from an LLM provider.

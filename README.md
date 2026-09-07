@@ -12,7 +12,7 @@ The project currently has:
 - testable CLI package under `internal/cli`
 - `ask` command for sending prompts to a configured model
 - config loading from process environment variables or a local `.env` file
-- minimal LLM package under `internal/llm` with message types, chat client interface, fake client, and OpenAI-compatible chat/completions client
+- minimal LLM package under `internal/llm` with message types, chat client interface, fake client, OpenAI-compatible chat/completions client, and tool-call response parsing
 - `internal/agent` runner that builds system/user/assistant message history for one model turn
 - `internal/tools` registry for named, schema-described tools
 - `echo` demo tool for deterministic tool-execution tests
