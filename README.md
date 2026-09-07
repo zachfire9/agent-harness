@@ -6,12 +6,13 @@ The goal of this repo is to make each agent concept understandable through small
 
 ## Current status
 
-Step 01 establishes the project foundation:
+The project currently has:
 
-- Go module
-- thin CLI entrypoint at `cmd/agent-harness/main.go`
+- Go module and thin CLI entrypoint at `cmd/agent-harness/main.go`
 - testable CLI package under `internal/cli`
-- initial test coverage for default invocation
+- `ask` command skeleton that formats prompts locally
+- config loading from process environment variables or a local `.env` file
+- minimal LLM package under `internal/llm` with message types, chat client interface, and fake client for deterministic tests
 
 ## Run
 

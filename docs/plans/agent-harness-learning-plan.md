@@ -126,9 +126,9 @@ agent-harness/
 
 ### Step 04 — LLM client interface
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-04-llm-client-interface`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/4
 - **Concept:** The agent runtime should depend on an interface, not a specific provider implementation.
 - **Functionality:**
   - Add `internal/llm` package.
@@ -138,7 +138,9 @@ agent-harness/
 - **Tests:**
   - Message roles/types are represented consistently.
   - Request construction preserves message ordering.
+  - Request construction copies messages to avoid caller mutation surprises.
   - Fake client satisfies the interface and can return deterministic responses.
+  - Fake client can return configured errors.
 - **Verification:**
   - `go test ./...`
 
