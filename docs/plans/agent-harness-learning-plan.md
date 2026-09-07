@@ -26,6 +26,7 @@ Every behavior introduced by a commit gets a deterministic unit test.
 - Unit tests should not call real LLM APIs.
 - LLM/network behavior should be tested with fakes or `httptest`.
 - Real model calls are manual smoke tests only.
+- Agent-loop steps should treat token growth as a design constraint: cap tool outputs early, then add explicit context-window management before longer-lived chat/session features.
 - Each implementation PR should pass:
 
 ```powershell
@@ -283,35 +284,58 @@ agent-harness/
   - `go test ./...`
   - Manual example: `agent-harness ask "What files are in this project?"`
 
-### Step 12 — Trace output for agent steps
+### Step 12 — Context window management
 
 - **Status:** Pending
-- **Branch:** `step-12-trace-output`
+- **Branch:** `step-12-context-window-management`
 - **Pull Request:** TBD
-- **Concept:** Agent systems need observability to be understandable and debuggable.
+- **Concept:** Stored run history and model context are different; agents need token-aware rules for deciding what gets sent back to the model.
+- **Functionality:**
+  - Add a context manager that builds the next model request from full run history.
+  - Always preserve the system prompt and original user goal.
+  - Keep the most recent messages needed for continuity.
+  - Enforce configurable message/tool-output character limits before calling the model.
+  - Add clear truncation notices when older or oversized context is omitted.
+  - Keep the first implementation deterministic and rule-based; summarization can be a later enhancement.
+- **Tests:**
+  - Short histories are sent unchanged.
+  - System prompt and original user goal are preserved when trimming is required.
+  - Recent assistant/tool messages are kept preferentially.
+  - Oversized tool results are truncated with an explicit notice.
+  - The context manager reports what was omitted for future trace/logging.
+- **Verification:**
+  - `go test ./...`
+
+### Step 13 — Trace output for agent steps
+
+- **Status:** Pending
+- **Branch:** `step-13-trace-output`
+- **Pull Request:** TBD
+- **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context trimming decisions.
 - **Functionality:**
   - Add `--trace` flag.
-  - Show model calls, tool calls, tool result summaries, errors, and final answer.
+  - Show model calls, tool calls, tool result summaries, context trimming notices, errors, and final answer.
   - Avoid printing secrets.
 - **Tests:**
   - Trace disabled by default.
   - Trace records model step.
   - Trace records tool call.
   - Trace records tool result summary.
+  - Trace records context trimming notices.
   - Trace avoids leaking API key.
 - **Verification:**
   - `go test ./...`
   - Manual example: `agent-harness ask --trace "Summarize this repo"`
 
-### Step 13 — Run/session logging
+### Step 14 — Run/session logging
 
 - **Status:** Pending
-- **Branch:** `step-13-run-session-logging`
+- **Branch:** `step-14-run-session-logging`
 - **Pull Request:** TBD
-- **Concept:** Agent runs should be inspectable after the fact.
+- **Concept:** Agent runs should be inspectable after the fact without forcing every stored detail back into model context.
 - **Functionality:**
-  - Save run logs as JSON under a local app directory.
-  - Include prompt, messages, tool calls, final answer, and errors.
+  - Save full run logs as JSON under a local app directory.
+  - Include prompt, stored messages, model-context snapshots, context trimming notices, tool calls, final answer, and errors.
   - Redact secrets.
 - **Tests:**
   - Run log file is created.
@@ -322,28 +346,30 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 14 — Interactive chat mode
+### Step 15 — Interactive chat mode
 
 - **Status:** Pending
-- **Branch:** `step-14-interactive-chat-mode`
+- **Branch:** `step-15-interactive-chat-mode`
 - **Pull Request:** TBD
-- **Concept:** A different interface can reuse the same agent runtime.
+- **Concept:** A different interface can reuse the same agent runtime while relying on context-window management to control token growth.
 - **Functionality:**
   - Add `agent-harness chat`.
   - Maintain message history across turns.
+  - Use the context manager when building each model request.
   - Support `exit` and `quit`.
 - **Tests:**
   - Chat session appends user turns.
   - `exit`/`quit` ends session.
   - Model errors do not corrupt history.
   - Multi-turn fake model test proves previous context is preserved.
+  - Long chat histories are trimmed before model calls.
 - **Verification:**
   - `go test ./...`
 
-### Step 15 — Gated command execution tool
+### Step 16 — Gated command execution tool
 
 - **Status:** Pending
-- **Branch:** `step-15-gated-command-tool`
+- **Branch:** `step-16-gated-command-tool`
 - **Pull Request:** TBD
 - **Concept:** Dangerous tools require policy, confirmation, and timeouts.
 - **Functionality:**
@@ -365,10 +391,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 16 — Provider/config polish
+### Step 17 — Provider/config polish
 
 - **Status:** Pending
-- **Branch:** `step-16-provider-config-polish`
+- **Branch:** `step-17-provider-config-polish`
 - **Pull Request:** TBD
 - **Concept:** Provider flexibility should be explicit and easy to verify.
 - **Functionality:**
@@ -376,25 +402,28 @@ agent-harness/
   - Normalize base URL handling.
   - Improve defaults and error messages.
   - Show active model in trace/config output without exposing the API key.
+  - Show configured context/message limits without exposing secrets.
 - **Tests:**
   - Config check succeeds with valid config.
   - Config check fails clearly with invalid config.
   - Base URL normalization works.
   - Output shows model name but not API key.
+  - Output shows context limits.
 - **Verification:**
   - `go test ./...`
   - `agent-harness config check`
 
-### Step 17 — Learning walkthrough documentation
+### Step 18 — Learning walkthrough documentation
 
 - **Status:** Pending
-- **Branch:** `step-17-learning-walkthrough-docs`
+- **Branch:** `step-18-learning-walkthrough-docs`
 - **Pull Request:** TBD
 - **Concept:** The repo should be both a working app and a learning artifact.
 - **Functionality:**
   - Expand README with a walkthrough of the completed stages.
   - Explain the core architecture.
   - Explain tool-calling flow.
+  - Explain message history vs model context.
   - Explain test strategy and how to run examples.
 - **Tests/verification:**
   - `go test ./...`
