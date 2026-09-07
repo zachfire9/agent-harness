@@ -244,7 +244,7 @@ agent-harness/
 
 ### Step 10 — Tool-call response parsing
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-10-tool-call-response-parsing`
 - **Pull Request:** TBD
 - **Concept:** The model requests tools; the harness parses those requests and remains in control.

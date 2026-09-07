@@ -76,12 +76,39 @@ func (c *OpenAIClient) Chat(ctx context.Context, request ChatRequest) (ChatRespo
 	}
 
 	message := parsed.Choices[0].Message
+	toolCalls, err := parseOpenAIToolCalls(message.ToolCalls)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+
 	return ChatResponse{
 		Message: Message{
 			Role:    Role(message.Role),
 			Content: message.Content,
 		},
+		ToolCalls: toolCalls,
 	}, nil
+}
+
+func parseOpenAIToolCalls(openAIToolCalls []openAIToolCall) ([]ToolCall, error) {
+	if len(openAIToolCalls) == 0 {
+		return nil, nil
+	}
+
+	toolCalls := make([]ToolCall, 0, len(openAIToolCalls))
+	for _, openAIToolCall := range openAIToolCalls {
+		arguments := json.RawMessage(openAIToolCall.Function.Arguments)
+		if !json.Valid(arguments) {
+			return nil, fmt.Errorf("invalid tool call arguments for %s", openAIToolCall.Function.Name)
+		}
+
+		toolCalls = append(toolCalls, ToolCall{
+			ID:        openAIToolCall.ID,
+			Name:      openAIToolCall.Function.Name,
+			Arguments: arguments,
+		})
+	}
+	return toolCalls, nil
 }
 
 func parseOpenAIErrorMessage(body []byte) string {
@@ -109,8 +136,18 @@ type openAIChatResponse struct {
 }
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
+}
+
+type openAIToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type openAIErrorResponse struct {

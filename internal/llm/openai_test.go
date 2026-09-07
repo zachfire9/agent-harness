@@ -89,6 +89,129 @@ func TestOpenAIClientTrimsTrailingBaseURLSlash(t *testing.T) {
 	}
 }
 
+func TestOpenAIClientParsesFinalAssistantResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"final answer"}}]}`))
+	}))
+	defer server.Close()
+
+	client := llm.NewOpenAIClient(server.URL, "test-api-key")
+	response, err := client.Chat(context.Background(), llm.NewChatRequest("gpt-test", llm.Message{Role: llm.RoleUser, Content: "hello"}))
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	if !response.IsFinalAnswer() {
+		t.Fatalf("expected final answer response, got %#v", response)
+	}
+	if response.Message.Content != "final answer" {
+		t.Fatalf("expected final answer content, got %q", response.Message.Content)
+	}
+	if len(response.ToolCalls) != 0 {
+		t.Fatalf("expected no tool calls, got %#v", response.ToolCalls)
+	}
+}
+
+func TestOpenAIClientParsesSingleToolCall(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices": [{
+				"message": {
+					"role": "assistant",
+					"content": null,
+					"tool_calls": [{
+						"id": "call_1",
+						"type": "function",
+						"function": {"name": "echo", "arguments": "{\"message\":\"hi\"}"}
+					}]
+				}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	client := llm.NewOpenAIClient(server.URL, "test-api-key")
+	response, err := client.Chat(context.Background(), llm.NewChatRequest("gpt-test", llm.Message{Role: llm.RoleUser, Content: "call echo"}))
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	if response.IsFinalAnswer() {
+		t.Fatalf("expected tool-call response, got final answer %#v", response)
+	}
+	if len(response.ToolCalls) != 1 {
+		t.Fatalf("expected one tool call, got %#v", response.ToolCalls)
+	}
+	call := response.ToolCalls[0]
+	if call.ID != "call_1" || call.Name != "echo" || string(call.Arguments) != `{"message":"hi"}` {
+		t.Fatalf("unexpected tool call: %#v", call)
+	}
+}
+
+func TestOpenAIClientParsesMultipleToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices": [{
+				"message": {
+					"role": "assistant",
+					"tool_calls": [
+						{"id": "call_1", "type": "function", "function": {"name": "echo", "arguments": "{\"message\":\"one\"}"}},
+						{"id": "call_2", "type": "function", "function": {"name": "echo", "arguments": "{\"message\":\"two\"}"}}
+					]
+				}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	client := llm.NewOpenAIClient(server.URL, "test-api-key")
+	response, err := client.Chat(context.Background(), llm.NewChatRequest("gpt-test", llm.Message{Role: llm.RoleUser, Content: "call echo twice"}))
+	if err != nil {
+		t.Fatalf("Chat returned error: %v", err)
+	}
+
+	if len(response.ToolCalls) != 2 {
+		t.Fatalf("expected two tool calls, got %#v", response.ToolCalls)
+	}
+	if response.ToolCalls[0].ID != "call_1" || response.ToolCalls[0].Name != "echo" {
+		t.Fatalf("unexpected first tool call: %#v", response.ToolCalls[0])
+	}
+	if response.ToolCalls[1].ID != "call_2" || response.ToolCalls[1].Name != "echo" {
+		t.Fatalf("unexpected second tool call: %#v", response.ToolCalls[1])
+	}
+}
+
+func TestOpenAIClientRejectsMalformedToolArguments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices": [{
+				"message": {
+					"role": "assistant",
+					"tool_calls": [{
+						"id": "call_bad",
+						"type": "function",
+						"function": {"name": "echo", "arguments": "{not json"}
+					}]
+				}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	client := llm.NewOpenAIClient(server.URL, "test-api-key")
+	_, err := client.Chat(context.Background(), llm.NewChatRequest("gpt-test", llm.Message{Role: llm.RoleUser, Content: "call echo"}))
+	if err == nil {
+		t.Fatal("expected malformed tool arguments error")
+	}
+	if !strings.Contains(err.Error(), "invalid tool call arguments for echo") {
+		t.Fatalf("expected useful malformed arguments error, got %q", err.Error())
+	}
+}
+
 func TestOpenAIClientParsesAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
