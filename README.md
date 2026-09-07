@@ -14,6 +14,7 @@ The project currently has:
 - config loading from process environment variables or a local `.env` file
 - minimal LLM package under `internal/llm` with message types, chat client interface, fake client, and OpenAI-compatible chat/completions client
 - `internal/agent` runner that builds system/user/assistant message history for one model turn
+- `internal/tools` registry for named, schema-described tools
 - `ask` wired through the agent runner to print the assistant response
 
 ## Run
