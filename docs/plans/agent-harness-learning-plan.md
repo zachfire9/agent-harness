@@ -186,9 +186,9 @@ agent-harness/
 
 ### Step 07 — Tool registry abstraction
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-07-tool-registry-abstraction`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/7
 - **Concept:** Tools are named, schema-described functions that the harness controls.
 - **Functionality:**
   - Add `Tool` interface.
