@@ -10,10 +10,11 @@ The project currently has:
 
 - Go module and thin CLI entrypoint at `cmd/agent-harness/main.go`
 - testable CLI package under `internal/cli`
-- `ask` command skeleton that formats prompts locally
+- `ask` command for sending prompts to a configured model
 - config loading from process environment variables or a local `.env` file
 - minimal LLM package under `internal/llm` with message types, chat client interface, fake client, and OpenAI-compatible chat/completions client
-- `ask` wired to send a system + user message to the configured model and print the assistant response
+- `internal/agent` runner that builds system/user/assistant message history for one model turn
+- `ask` wired through the agent runner to print the assistant response
 
 ## Run
 
