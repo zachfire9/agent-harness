@@ -88,6 +88,88 @@ func TestRunAskCommandReturnsAgentError(t *testing.T) {
 	}
 }
 
+func TestRunToolCommandExecutesEchoTool(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "echo", `{"message":"hi"}`)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stdout != "hi\n" {
+		t.Fatalf("expected tool output, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+}
+
+func TestRunToolCommandRequiresToolNameAndJSONArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing tool name", args: []string{"agent-harness", "tool"}, want: "tool requires a tool name and JSON args"},
+		{name: "missing JSON args", args: []string{"agent-harness", "tool", "echo"}, want: "tool requires a tool name and JSON args"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, exitCode := runCLI(tt.args...)
+			if exitCode == 0 {
+				t.Fatal("expected non-zero exit code")
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, tt.want) {
+				t.Fatalf("expected helpful usage error containing %q, got %q", tt.want, stderr)
+			}
+		})
+	}
+}
+
+func TestRunToolCommandUnknownToolReturnsHelpfulError(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "missing_tool", `{"message":"hi"}`)
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code for unknown tool")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "unknown tool: missing_tool") {
+		t.Fatalf("expected helpful unknown tool error, got %q", stderr)
+	}
+}
+
+func TestRunToolCommandInvalidJSONReturnsHelpfulError(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "echo", `{"message":`)
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code for invalid JSON")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "tool failed: invalid echo arguments") {
+		t.Fatalf("expected helpful invalid JSON error, got %q", stderr)
+	}
+}
+
+func TestRunToolCommandToolExecutionErrorReturnsHelpfulError(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "echo", `{}`)
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code for tool execution error")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "tool failed: message is required") {
+		t.Fatalf("expected helpful tool execution error, got %q", stderr)
+	}
+}
+
 func TestRunUnknownCommandReturnsHelpfulError(t *testing.T) {
 	stdout, stderr, exitCode := runCLI("agent-harness", "dance")
 

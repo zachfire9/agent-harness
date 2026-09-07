@@ -16,6 +16,7 @@ The project currently has:
 - `internal/agent` runner that builds system/user/assistant message history for one model turn
 - `internal/tools` registry for named, schema-described tools
 - `echo` demo tool for deterministic tool-execution tests
+- `tool` debug command for manually executing registered tools without an LLM/API call
 - `ask` wired through the agent runner to print the assistant response
 
 ## Run
@@ -43,6 +44,20 @@ An agent is a program that uses a model to decide what to do next, optionally ca
 ```
 
 If config is missing, the command fails before making a model call and prints a helpful config error.
+
+Debug a registered tool without making a model/API call:
+
+```powershell
+go run ./cmd/agent-harness tool echo '{"message":"hello from tool debug"}'
+```
+
+Expected output:
+
+```text
+hello from tool debug
+```
+
+This path executes the same registered tool implementation that the agent loop will use later, but it bypasses the LLM so tool behavior can be tested directly.
 
 ## Configuration
 
