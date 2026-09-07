@@ -32,11 +32,14 @@ func (c *OpenAIClient) Chat(ctx context.Context, request ChatRequest) (ChatRespo
 	payload := openAIChatRequest{
 		Model:    request.Model,
 		Messages: make([]openAIMessage, len(request.Messages)),
+		Tools:    openAIToolSpecs(request.Tools),
 	}
 	for i, message := range request.Messages {
 		payload.Messages[i] = openAIMessage{
-			Role:    string(message.Role),
-			Content: message.Content,
+			Role:       string(message.Role),
+			Content:    message.Content,
+			ToolCallID: message.ToolCallID,
+			ToolCalls:  openAIToolCalls(message.ToolCalls),
 		}
 	}
 
@@ -83,11 +86,49 @@ func (c *OpenAIClient) Chat(ctx context.Context, request ChatRequest) (ChatRespo
 
 	return ChatResponse{
 		Message: Message{
-			Role:    Role(message.Role),
-			Content: message.Content,
+			Role:      Role(message.Role),
+			Content:   message.Content,
+			ToolCalls: toolCalls,
 		},
 		ToolCalls: toolCalls,
 	}, nil
+}
+
+func openAIToolSpecs(tools []ToolSpec) []openAIToolSpec {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	openAITools := make([]openAIToolSpec, 0, len(tools))
+	for _, tool := range tools {
+		openAITools = append(openAITools, openAIToolSpec{
+			Type: "function",
+			Function: openAIToolFunctionSpec{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  tool.Schema,
+			},
+		})
+	}
+	return openAITools
+}
+
+func openAIToolCalls(toolCalls []ToolCall) []openAIToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+
+	openAICalls := make([]openAIToolCall, 0, len(toolCalls))
+	for _, toolCall := range toolCalls {
+		openAICall := openAIToolCall{
+			ID:   toolCall.ID,
+			Type: "function",
+		}
+		openAICall.Function.Name = toolCall.Name
+		openAICall.Function.Arguments = string(toolCall.Arguments)
+		openAICalls = append(openAICalls, openAICall)
+	}
+	return openAICalls
 }
 
 func parseOpenAIToolCalls(openAIToolCalls []openAIToolCall) ([]ToolCall, error) {
@@ -125,8 +166,9 @@ func parseOpenAIErrorMessage(body []byte) string {
 }
 
 type openAIChatRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMessage `json:"messages"`
+	Model    string           `json:"model"`
+	Messages []openAIMessage  `json:"messages"`
+	Tools    []openAIToolSpec `json:"tools,omitempty"`
 }
 
 type openAIChatResponse struct {
@@ -136,9 +178,21 @@ type openAIChatResponse struct {
 }
 
 type openAIMessage struct {
-	Role      string           `json:"role"`
-	Content   string           `json:"content"`
-	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+}
+
+type openAIToolSpec struct {
+	Type     string                 `json:"type"`
+	Function openAIToolFunctionSpec `json:"function"`
+}
+
+type openAIToolFunctionSpec struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
 type openAIToolCall struct {

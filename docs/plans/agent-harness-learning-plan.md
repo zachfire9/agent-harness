@@ -263,9 +263,9 @@ agent-harness/
 
 ### Step 11 — First agent loop with tool execution
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-11-agent-loop-tool-execution`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/11
 - **Concept:** The core agent loop is model call -> tool execution -> observation -> repeat -> final answer.
 - **Functionality:**
   - Send messages to the model.
@@ -282,10 +282,33 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 12 — Workspace-safe file tools
+### Step 12 — Interactive chat mode
 
 - **Status:** Pending
-- **Branch:** `step-12-workspace-file-tools`
+- **Branch:** `step-12-interactive-chat-mode`
+- **Pull Request:** TBD
+- **Concept:** Interactive agents preserve conversation history across user turns, while each turn can still use the existing agent/tool loop internally.
+- **Functionality:**
+  - Add `agent-harness chat`.
+  - Read user input in a prompt loop, such as `You:`, and print assistant replies, such as `Agent:`.
+  - Maintain in-memory message history for the lifetime of the chat process.
+  - Reuse the same agent runtime/tool registry used by `ask` so each chat turn can still run tool loops before producing a final answer.
+  - Support `/exit`, `exit`, `quit`, EOF, and interrupt-friendly shutdown.
+  - Keep the first version in-memory only; persisted named sessions can be a later step.
+- **Tests:**
+  - Chat command starts a prompt loop with injected input/output streams.
+  - A second user turn includes earlier user/assistant context in the fake model request.
+  - `exit`, `quit`, `/exit`, and EOF end the session cleanly.
+  - Model errors print a controlled error and allow the session to continue or exit without corrupting history.
+  - Tool calls still execute inside a chat turn through the existing registry path.
+- **Verification:**
+  - `go test ./...`
+  - Manual example: `agent-harness chat`, then ask `What is an agent?` followed by `Can you give a simpler example?`
+
+### Step 13 — Workspace-safe file tools
+
+- **Status:** Pending
+- **Branch:** `step-13-workspace-file-tools`
 - **Pull Request:** TBD
 - **Concept:** Useful tools need sandboxing, output limits, and predictable errors.
 - **Functionality:**
@@ -306,10 +329,10 @@ agent-harness/
   - `go test ./...`
   - Manual example: `agent-harness ask "What files are in this project?"`
 
-### Step 13 — Context window management
+### Step 14 — Context window management
 
 - **Status:** Pending
-- **Branch:** `step-13-context-window-management`
+- **Branch:** `step-14-context-window-management`
 - **Pull Request:** TBD
 - **Concept:** Stored run history and model context are different; agents need token-aware rules for deciding what gets sent back to the model.
 - **Functionality:**
@@ -328,10 +351,10 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 14 — Trace output for agent steps
+### Step 15 — Trace output for agent steps
 
 - **Status:** Pending
-- **Branch:** `step-14-trace-output`
+- **Branch:** `step-15-trace-output`
 - **Pull Request:** TBD
 - **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context trimming decisions.
 - **Functionality:**
@@ -349,10 +372,10 @@ agent-harness/
   - `go test ./...`
   - Manual example: `agent-harness ask --trace "Summarize this repo"`
 
-### Step 15 — Run/session logging
+### Step 16 — Run/session logging
 
 - **Status:** Pending
-- **Branch:** `step-15-run-session-logging`
+- **Branch:** `step-16-run-session-logging`
 - **Pull Request:** TBD
 - **Concept:** Agent runs should be inspectable after the fact without forcing every stored detail back into model context.
 - **Functionality:**
@@ -365,26 +388,6 @@ agent-harness/
   - Failed run logs an error.
   - Secrets are redacted.
   - Logging can be disabled if needed.
-- **Verification:**
-  - `go test ./...`
-
-### Step 16 — Interactive chat mode
-
-- **Status:** Pending
-- **Branch:** `step-16-interactive-chat-mode`
-- **Pull Request:** TBD
-- **Concept:** A different interface can reuse the same agent runtime while relying on context-window management to control token growth.
-- **Functionality:**
-  - Add `agent-harness chat`.
-  - Maintain message history across turns.
-  - Use the context manager when building each model request.
-  - Support `exit` and `quit`.
-- **Tests:**
-  - Chat session appends user turns.
-  - `exit`/`quit` ends session.
-  - Model errors do not corrupt history.
-  - Multi-turn fake model test proves previous context is preserved.
-  - Long chat histories are trimmed before model calls.
 - **Verification:**
   - `go test ./...`
 
@@ -466,3 +469,4 @@ These are intentionally not part of the first learning sequence:
 - Browser/web search tools.
 
 They are good follow-up milestones once the basic local CLI agent harness is understandable and reviewable.
+

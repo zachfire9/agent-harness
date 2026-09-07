@@ -17,14 +17,24 @@ const (
 
 // Message is one item in a chat transcript.
 type Message struct {
-	Role    Role
-	Content string
+	Role       Role
+	Content    string
+	ToolCallID string
+	ToolCalls  []ToolCall
 }
 
-// ChatRequest contains the model name and ordered messages for one chat call.
+// ToolSpec describes one tool the model may request.
+type ToolSpec struct {
+	Name        string
+	Description string
+	Schema      map[string]any
+}
+
+// ChatRequest contains the model name, ordered messages, and available tools for one chat call.
 type ChatRequest struct {
 	Model    string
 	Messages []Message
+	Tools    []ToolSpec
 }
 
 // ToolCall is a model-requested function/tool invocation.

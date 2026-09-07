@@ -13,7 +13,7 @@ The project currently has:
 - `ask` command for sending prompts to a configured model
 - config loading from process environment variables or a local `.env` file
 - minimal LLM package under `internal/llm` with message types, chat client interface, fake client, OpenAI-compatible chat/completions client, and tool-call response parsing
-- `internal/agent` runner that builds system/user/assistant message history for one model turn
+- `internal/agent` runner that builds message history, sends available tool metadata, executes model-requested tools, appends tool results, and repeats until a final answer
 - `internal/tools` registry for named, schema-described tools
 - `echo` demo tool for deterministic tool-execution tests
 - `tool` debug command for manually executing registered tools without an LLM/API call
