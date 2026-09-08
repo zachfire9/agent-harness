@@ -16,6 +16,7 @@ The project currently has:
 - `internal/agent` runner that builds message history, sends available tool metadata, executes model-requested tools, appends tool results, and repeats until a final answer
 - `internal/tools` registry for named, schema-described tools
 - `echo` demo tool for deterministic tool-execution tests
+- workspace-safe `list_files`, `read_file`, and `search_files` tools with path sandboxing and output caps
 - `tool` debug command for manually executing registered tools without an LLM/API call
 - `ask` wired through the agent runner to print the assistant response
 - `chat` command for an in-memory interactive conversation that preserves history across turns while still allowing tool calls inside each turn
@@ -78,6 +79,16 @@ hello from tool debug
 ```
 
 This path executes the same registered tool implementation that the agent loop will use later, but it bypasses the LLM so tool behavior can be tested directly.
+
+Debug workspace file tools from the current working directory:
+
+```powershell
+go run ./cmd/agent-harness tool list_files '{"path":"."}'
+go run ./cmd/agent-harness tool read_file '{"path":"README.md"}'
+go run ./cmd/agent-harness tool search_files '{"query":"agent","path":"."}'
+```
+
+The workspace root is the directory where you run `agent-harness`. File tools reject `..` traversal and absolute paths outside that workspace, skip sensitive local files such as `.env` and `.git`, and cap long outputs with an explicit truncation notice.
 
 ## Configuration
 
