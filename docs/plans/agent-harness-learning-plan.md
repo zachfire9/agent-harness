@@ -391,7 +391,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-16-run-session-logging`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/16
 - **Concept:** Agent runs should be inspectable after the fact without forcing every stored detail back into model context.
 - **Functionality:**
   - Add durable structured run/session logs using Go's standard `log/slog` or a small app-specific JSONL event writer built around `slog`-style structured events.
