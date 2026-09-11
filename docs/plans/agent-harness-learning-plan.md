@@ -333,7 +333,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-14-context-window-management`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/14
 - **Concept:** Stored run history and model context are different; agents need token-aware rules for deciding what gets sent back to the model.
 - **Functionality:**
   - Add a context manager that builds the next model request from full run history.
