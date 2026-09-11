@@ -17,6 +17,7 @@ The project currently has:
 - `internal/tools` registry for named, schema-described tools
 - `echo` demo tool for deterministic tool-execution tests
 - workspace-safe `list_files`, `read_file`, and `search_files` tools with path sandboxing and output caps
+- deterministic context-window management that preserves the system prompt and original user goal, keeps recent history, summarizes older omitted messages with a separately configured summary model, and truncates oversized messages before model calls
 - `tool` debug command for manually executing registered tools without an LLM/API call
 - `ask` wired through the agent runner to print the assistant response
 - `chat` command for an in-memory interactive conversation that preserves history across turns while still allowing tool calls inside each turn
@@ -100,6 +101,17 @@ Step 03 adds configuration loading for future model calls. The app loads config 
 
 Process environment variables take precedence over values in `.env`. Only `OPENAI_API_KEY` is required. `OPENAI_BASE_URL` and `OPENAI_MODEL` have defaults.
 
+Context-window limits are optional and deterministic:
+
+- `AGENT_MAX_CONTEXT_MESSAGES` caps how many messages are sent to the model.
+- `AGENT_MAX_MESSAGE_CHARS` caps non-tool message content.
+- `AGENT_MAX_TOOL_RESULT_CHARS` caps tool-result content separately so large tool outputs cannot crowd out the conversation.
+- `AGENT_SUMMARY_MODEL` selects the separately configured model used to update the running summary; it defaults to `gpt-4.1-mini`.
+- `AGENT_MAX_SUMMARY_CHARS` caps the inserted summary message.
+- `AGENT_SUMMARY_MAX_INPUT_MESSAGES` controls how many newly compacted messages are sent to one summary-model update; it defaults to `10` and accepts any positive integer without an app-enforced upper cap.
+
+The context manager preserves the system prompt and original user goal, keeps the most recent remaining messages, updates a running summary for older omitted messages, and inserts that summary into the next model request. Interactive chat proactively starts summary updates in a background goroutine after a response when the next user turn is likely to exceed the message cap; if the next user message arrives while that update is still running, the chat waits for the prepared summary before making the next main model call. Oversized latest user prompts are rejected with a clear error instead of being silently truncated. Any remaining hard truncation, such as capped tool results or capped inserted summaries, is logged to stderr as a `context warning` with kept/omitted/original character counts so we can monitor frequency and tune the limits later.
+
 ### Create an OpenAI API key
 
 Your ChatGPT Plus subscription does not cover API usage. API requests are billed separately through the OpenAI Platform.
@@ -126,6 +138,12 @@ Then edit `.env` and replace the placeholder API key:
 OPENAI_API_KEY=your-openai-api-key-here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4.1-mini
+AGENT_SUMMARY_MODEL=gpt-4.1-mini
+AGENT_MAX_CONTEXT_MESSAGES=40
+AGENT_MAX_MESSAGE_CHARS=8000
+AGENT_MAX_TOOL_RESULT_CHARS=4000
+AGENT_MAX_SUMMARY_CHARS=2000
+AGENT_SUMMARY_MAX_INPUT_MESSAGES=10
 ```
 
 `.env` is listed in `.gitignore`, so local secrets stay out of git. `.env.example` is safe to commit because it contains placeholders only.

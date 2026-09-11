@@ -331,23 +331,33 @@ agent-harness/
 
 ### Step 14 — Context window management
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-14-context-window-management`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/14
 - **Concept:** Stored run history and model context are different; agents need token-aware rules for deciding what gets sent back to the model.
 - **Functionality:**
   - Add a context manager that builds the next model request from full run history.
-  - Always preserve the system prompt and original user goal.
+  - Always preserve the system prompt, original user goal, and latest user message.
   - Keep the most recent messages needed for continuity.
   - Enforce configurable message/tool-output character limits before calling the model.
-  - Add clear truncation notices when older or oversized context is omitted.
-  - Keep the first implementation deterministic and rule-based; summarization can be a later enhancement.
+  - Add an LLM-backed running summary for older messages that are compacted out of the raw model context.
+  - Configure the summary model separately from the main model with `AGENT_SUMMARY_MODEL`, defaulting to `gpt-4.1-mini`.
+  - Configure `AGENT_MAX_SUMMARY_CHARS` for the inserted summary and `AGENT_SUMMARY_MAX_INPUT_MESSAGES` for per-summary-call batching; default summary input batch size is `10` with no app-enforced upper cap beyond requiring a positive integer.
+  - In interactive chat, proactively start a background goroutine after each response when the next user turn is likely to require summarization; if the next user message arrives before the job completes, wait for the prepared summary before the next main LLM call.
+  - Return a clear error instead of silently truncating the latest user prompt when it exceeds `AGENT_MAX_MESSAGE_CHARS`.
+  - Log every remaining hard truncation, including tool-result and inserted-summary truncation, as an explicit context warning with kept, omitted, and original character counts.
+  - Keep full raw history separate from model-facing summarized context.
 - **Tests:**
   - Short histories are sent unchanged.
-  - System prompt and original user goal are preserved when trimming is required.
+  - System prompt, original user goal, and latest user message are preserved when trimming is required.
   - Recent assistant/tool messages are kept preferentially.
+  - Older compacted messages are incorporated into a running summary via the configured summary model.
+  - Summary updates are batched by `AGENT_SUMMARY_MAX_INPUT_MESSAGES`.
+  - Background summary jobs are started only when the next chat turn is likely to exceed limits.
+  - Oversized latest user prompts return a clear error instead of being silently truncated.
   - Oversized tool results are truncated with an explicit notice.
-  - The context manager reports what was omitted for future trace/logging.
+  - Summary and tool-result truncation events are logged clearly enough to monitor frequency and tune limits later.
+  - The context manager reports omitted, summarized, and truncated context for future trace/logging.
 - **Verification:**
   - `go test ./...`
 
@@ -356,17 +366,22 @@ agent-harness/
 - **Status:** Pending
 - **Branch:** `step-15-trace-output`
 - **Pull Request:** TBD
-- **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context trimming decisions.
+- **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context compaction, running-summary, and hard-truncation decisions.
 - **Functionality:**
   - Add `--trace` flag.
-  - Show model calls, tool calls, tool result summaries, context trimming notices, errors, and final answer.
-  - Avoid printing secrets.
+  - Show model calls, tool calls, tool result summaries, errors, and final answer.
+  - Render `ContextReport` details before model calls when trace is enabled, including input/output message counts, max message limits, omitted message counts, summarized message counts, whether a summary was inserted, summary model update counts, and any truncation records.
+  - Show summary-specific trace details, including which summary model is configured and whether interactive chat used an already-prepared background summary or waited for a pending summary job.
+  - Keep the always-visible Step 14 `context warning` output for hard truncation, but make trace output the richer explanation of why the truncation happened.
+  - Avoid printing secrets or full oversized content in trace output.
 - **Tests:**
   - Trace disabled by default.
   - Trace records model step.
   - Trace records tool call.
   - Trace records tool result summary.
-  - Trace records context trimming notices.
+  - Trace records context compaction reports from `ContextReport`.
+  - Trace records hard truncation details without dumping full truncated content.
+  - Trace records summary/background-summary events.
   - Trace avoids leaking API key.
 - **Verification:**
   - `go test ./...`
@@ -379,12 +394,16 @@ agent-harness/
 - **Pull Request:** TBD
 - **Concept:** Agent runs should be inspectable after the fact without forcing every stored detail back into model context.
 - **Functionality:**
-  - Save full run logs as JSON under a local app directory.
-  - Include prompt, stored messages, model-context snapshots, context trimming notices, tool calls, final answer, and errors.
+  - Add durable structured run/session logs using Go's standard `log/slog` or a small app-specific JSONL event writer built around `slog`-style structured events.
+  - Save full run logs as JSON/JSONL under a local app directory.
+  - Include prompt, stored messages, model-context snapshots, `ContextReport` data, context compaction notices, truncation warnings, summary updates, tool calls, final answer, and errors.
+  - Persist hard truncation events as machine-readable records so frequency can be measured over time, with fields for role/source, message index, kept characters, omitted characters, and original characters.
+  - Keep trace output human-facing and opt-in; keep run/session logging durable and structured.
   - Redact secrets.
 - **Tests:**
   - Run log file is created.
   - Log JSON has expected fields.
+  - Context compaction and truncation events are written as structured log records.
   - Failed run logs an error.
   - Secrets are redacted.
   - Logging can be disabled if needed.
@@ -416,10 +435,30 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 18 — Provider/config polish
+### Step 18 — Vector store abstraction for future RAG support
 
 - **Status:** Pending
-- **Branch:** `step-18-provider-config-polish`
+- **Branch:** `step-18-vector-store-abstraction`
+- **Pull Request:** TBD
+- **Concept:** RAG-ready applications isolate vector retrieval behind an interface before committing to a specific vector database provider.
+- **Functionality:**
+  - Add an `internal/vectorstore` package with a small provider-neutral interface for future document upserts and similarity search.
+  - Add a no-op or in-memory implementation used by default so the first app iteration does not require a real vector database.
+  - Add a small factory that selects the implementation from config, starting with `none` and failing clearly for unsupported providers.
+  - Add future-facing config placeholders such as `VECTOR_STORE_PROVIDER=none` without requiring credentials or network access.
+  - Document future provider candidates such as pgvector, Qdrant, Pinecone, Weaviate, and Chroma without adding their SDKs yet.
+- **Tests:**
+  - Default config selects the no-op/in-memory vector store.
+  - Unsupported providers return a controlled error.
+  - Agent-facing code can depend on the vector store interface instead of a concrete vendor.
+  - No test requires a real vector database or external network.
+- **Verification:**
+  - `go test ./...`
+
+### Step 19 — Provider/config polish
+
+- **Status:** Pending
+- **Branch:** `step-19-provider-config-polish`
 - **Pull Request:** TBD
 - **Concept:** Provider flexibility should be explicit and easy to verify.
 - **Functionality:**
@@ -428,20 +467,22 @@ agent-harness/
   - Improve defaults and error messages.
   - Show active model in trace/config output without exposing the API key.
   - Show configured context/message limits without exposing secrets.
+  - Show configured vector store provider without requiring vector DB credentials when the provider is `none`.
 - **Tests:**
   - Config check succeeds with valid config.
   - Config check fails clearly with invalid config.
   - Base URL normalization works.
   - Output shows model name but not API key.
   - Output shows context limits.
+  - Output shows vector store provider.
 - **Verification:**
   - `go test ./...`
   - `agent-harness config check`
 
-### Step 19 — Learning walkthrough documentation
+### Step 20 — Learning walkthrough documentation
 
 - **Status:** Pending
-- **Branch:** `step-19-learning-walkthrough-docs`
+- **Branch:** `step-20-learning-walkthrough-docs`
 - **Pull Request:** TBD
 - **Concept:** The repo should be both a working app and a learning artifact.
 - **Functionality:**

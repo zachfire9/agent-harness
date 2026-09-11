@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/cli"
 	"github.com/zachfire9/agent-harness/internal/llm"
 )
@@ -392,6 +393,26 @@ func TestRunUnknownCommandReturnsHelpfulError(t *testing.T) {
 	}
 }
 
+func TestRunChatLogsContextTruncationWarning(t *testing.T) {
+	fake := &recordingChatClient{
+		responses: []llm.ChatResponse{
+			{Message: llm.Message{Role: llm.RoleAssistant, Content: "this assistant response will be truncated on the next turn"}},
+			{Message: llm.Message{Role: llm.RoleAssistant, Content: "second answer"}},
+		},
+	}
+	stdout, stderr, exitCode := runAppWithInputAndContextLimits(fake, "gpt-test", agent.ContextLimits{MaxMessages: 10, MaxMessageChars: 12, MaxToolResultChars: 100}, "short\nagain\nexit\n", "agent-harness", "chat")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stdout: %s; stderr: %s", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "context warning: truncated assistant message") {
+		t.Fatalf("expected truncation warning in stderr, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "omitted=") {
+		t.Fatalf("expected truncation details in stderr, got %q", stderr)
+	}
+}
+
 func runCLI(args ...string) (stdout string, stderr string, exitCode int) {
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -416,6 +437,16 @@ func runAppWithInput(client llm.ChatClient, model string, input string, args ...
 	var stderrBuffer bytes.Buffer
 
 	app := cli.NewAppWithInput(client, model, strings.NewReader(input))
+	exitCode = app.Run(args, &stdoutBuffer, &stderrBuffer)
+
+	return stdoutBuffer.String(), stderrBuffer.String(), exitCode
+}
+
+func runAppWithInputAndContextLimits(client llm.ChatClient, model string, limits agent.ContextLimits, input string, args ...string) (stdout string, stderr string, exitCode int) {
+	var stdoutBuffer bytes.Buffer
+	var stderrBuffer bytes.Buffer
+
+	app := cli.NewAppWithInputAndContextLimits(client, model, strings.NewReader(input), limits)
 	exitCode = app.Run(args, &stdoutBuffer, &stderrBuffer)
 
 	return stdoutBuffer.String(), stderrBuffer.String(), exitCode
