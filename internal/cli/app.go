@@ -23,6 +23,7 @@ type App struct {
 	model         string
 	stdin         io.Reader
 	contextLimits agent.ContextLimits
+	summarizer    agent.Summarizer
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
@@ -36,16 +37,19 @@ func NewAppWithInput(chatClient llm.ChatClient, model string, stdin io.Reader) A
 }
 
 // NewAppWithConfig creates a CLI app from loaded configuration.
-func NewAppWithConfig(chatClient llm.ChatClient, cfg config.Config) App {
+func NewAppWithConfig(chatClient llm.ChatClient, summaryClient llm.ChatClient, cfg config.Config) App {
 	return App{
 		chatClient: chatClient,
 		model:      cfg.Model,
 		stdin:      os.Stdin,
 		contextLimits: agent.ContextLimits{
-			MaxMessages:        cfg.MaxContextMessages,
-			MaxMessageChars:    cfg.MaxMessageChars,
-			MaxToolResultChars: cfg.MaxToolResultChars,
+			MaxMessages:             cfg.MaxContextMessages,
+			MaxMessageChars:         cfg.MaxMessageChars,
+			MaxToolResultChars:      cfg.MaxToolResultChars,
+			MaxSummaryChars:         cfg.MaxSummaryChars,
+			SummaryMaxInputMessages: cfg.SummaryInputMessages,
 		},
+		summarizer: agent.NewLLMSummarizer(summaryClient, cfg.SummaryModel),
 	}
 }
 
@@ -61,7 +65,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	app := NewAppWithConfig(llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), cfg)
+	app := NewAppWithConfig(llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), cfg)
 	return app.Run(args, stdout, stderr)
 }
 
@@ -101,7 +105,7 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
 	}
-	runner := agent.NewWithToolsAndContextLimits(a.chatClient, a.model, registry, a.contextLimits)
+	runner := agent.NewWithToolsContextLimitsAndSummarizer(a.chatClient, a.model, registry, a.contextLimits, a.summarizer)
 	result, err := runner.Run(context.Background(), prompt)
 	if err != nil {
 		fmt.Fprintf(stderr, "ask failed: %v\n", err)
@@ -127,9 +131,11 @@ func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
 	}
-	runner := agent.NewWithToolsAndContextLimits(a.chatClient, a.model, registry, a.contextLimits)
+	runner := agent.NewWithToolsContextLimitsAndSummarizer(a.chatClient, a.model, registry, a.contextLimits, a.summarizer)
 	scanner := bufio.NewScanner(stdin)
 	var history []llm.Message
+	var summary agent.ConversationSummary
+	var pendingSummary *summaryJob
 
 	for {
 		fmt.Fprint(stdout, "You: ")
@@ -151,14 +157,24 @@ func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
 			continue
 		}
 
-		result, err := runner.RunWithHistory(context.Background(), history, prompt)
+		if pendingSummary != nil {
+			updatedSummary, err := pendingSummary.Wait(context.Background())
+			if err == nil {
+				summary = updatedSummary
+			}
+			pendingSummary = nil
+		}
+
+		result, err := runner.RunWithSummary(context.Background(), history, summary, prompt)
 		if err != nil {
 			fmt.Fprintf(stderr, "chat turn failed: %v\n", err)
 			continue
 		}
 
 		history = result.Messages
+		summary = result.Summary
 		fmt.Fprintf(stdout, "Agent: %s\n", result.Answer)
+		pendingSummary = startSummaryJob(context.Background(), history, summary, a.contextLimits, a.summarizer)
 	}
 }
 

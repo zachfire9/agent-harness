@@ -337,17 +337,23 @@ agent-harness/
 - **Concept:** Stored run history and model context are different; agents need token-aware rules for deciding what gets sent back to the model.
 - **Functionality:**
   - Add a context manager that builds the next model request from full run history.
-  - Always preserve the system prompt and original user goal.
+  - Always preserve the system prompt, original user goal, and latest user message.
   - Keep the most recent messages needed for continuity.
   - Enforce configurable message/tool-output character limits before calling the model.
-  - Add clear truncation notices when older or oversized context is omitted.
-  - Keep the first implementation deterministic and rule-based; summarization can be a later enhancement.
+  - Add an LLM-backed running summary for older messages that are compacted out of the raw model context.
+  - Configure the summary model separately from the main model with `AGENT_SUMMARY_MODEL`, defaulting to `gpt-4.1-mini`.
+  - Configure `AGENT_MAX_SUMMARY_CHARS` for the inserted summary and `AGENT_SUMMARY_MAX_INPUT_MESSAGES` for per-summary-call batching; default summary input batch size is `10` with no app-enforced upper cap beyond requiring a positive integer.
+  - In interactive chat, proactively start a background goroutine after each response when the next user turn is likely to require summarization; if the next user message arrives before the job completes, wait for the prepared summary before the next main LLM call.
+  - Keep full raw history separate from model-facing summarized context.
 - **Tests:**
   - Short histories are sent unchanged.
-  - System prompt and original user goal are preserved when trimming is required.
+  - System prompt, original user goal, and latest user message are preserved when trimming is required.
   - Recent assistant/tool messages are kept preferentially.
+  - Older compacted messages are incorporated into a running summary via the configured summary model.
+  - Summary updates are batched by `AGENT_SUMMARY_MAX_INPUT_MESSAGES`.
+  - Background summary jobs are started only when the next chat turn is likely to exceed limits.
   - Oversized tool results are truncated with an explicit notice.
-  - The context manager reports what was omitted for future trace/logging.
+  - The context manager reports omitted, summarized, and truncated context for future trace/logging.
 - **Verification:**
   - `go test ./...`
 

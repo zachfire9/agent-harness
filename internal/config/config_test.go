@@ -44,6 +44,12 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.Model != "gpt-4.1-mini" {
 		t.Fatalf("expected default model, got %q", cfg.Model)
 	}
+	if cfg.SummaryModel != "gpt-4.1-mini" {
+		t.Fatalf("expected default summary model, got %q", cfg.SummaryModel)
+	}
+	if cfg.SummaryInputMessages != 10 {
+		t.Fatalf("expected default summary input messages, got %d", cfg.SummaryInputMessages)
+	}
 }
 
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
@@ -133,6 +139,9 @@ func TestLoadReadsContextLimits(t *testing.T) {
 	t.Setenv("AGENT_MAX_CONTEXT_MESSAGES", "12")
 	t.Setenv("AGENT_MAX_MESSAGE_CHARS", "2000")
 	t.Setenv("AGENT_MAX_TOOL_RESULT_CHARS", "500")
+	t.Setenv("AGENT_MAX_SUMMARY_CHARS", "1500")
+	t.Setenv("AGENT_SUMMARY_MAX_INPUT_MESSAGES", "25")
+	t.Setenv("AGENT_SUMMARY_MODEL", "gpt-4.1-nano")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -147,6 +156,15 @@ func TestLoadReadsContextLimits(t *testing.T) {
 	}
 	if cfg.MaxToolResultChars != 500 {
 		t.Fatalf("expected max tool result chars from env, got %d", cfg.MaxToolResultChars)
+	}
+	if cfg.MaxSummaryChars != 1500 {
+		t.Fatalf("expected max summary chars from env, got %d", cfg.MaxSummaryChars)
+	}
+	if cfg.SummaryInputMessages != 25 {
+		t.Fatalf("expected summary input messages from env, got %d", cfg.SummaryInputMessages)
+	}
+	if cfg.SummaryModel != "gpt-4.1-nano" {
+		t.Fatalf("expected summary model from env, got %q", cfg.SummaryModel)
 	}
 }
 

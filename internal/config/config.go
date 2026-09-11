@@ -9,21 +9,27 @@ import (
 )
 
 const (
-	DefaultBaseURL            = "https://api.openai.com/v1"
-	DefaultModel              = "gpt-4.1-mini"
-	DefaultMaxContextMessages = 40
-	DefaultMaxMessageChars    = 8000
-	DefaultMaxToolResultChars = 4000
+	DefaultBaseURL              = "https://api.openai.com/v1"
+	DefaultModel                = "gpt-4.1-mini"
+	DefaultSummaryModel         = "gpt-4.1-mini"
+	DefaultMaxContextMessages   = 40
+	DefaultMaxMessageChars      = 8000
+	DefaultMaxToolResultChars   = 4000
+	DefaultMaxSummaryChars      = 2000
+	DefaultSummaryInputMessages = 10
 )
 
 // Config contains the model/provider settings needed by the agent harness.
 type Config struct {
-	APIKey             string
-	BaseURL            string
-	Model              string
-	MaxContextMessages int
-	MaxMessageChars    int
-	MaxToolResultChars int
+	APIKey               string
+	BaseURL              string
+	Model                string
+	SummaryModel         string
+	MaxContextMessages   int
+	MaxMessageChars      int
+	MaxToolResultChars   int
+	MaxSummaryChars      int
+	SummaryInputMessages int
 }
 
 // Load reads configuration from process environment variables and an optional
@@ -46,6 +52,10 @@ func Load() (Config, error) {
 	if model == "" {
 		model = DefaultModel
 	}
+	summaryModel := configValue("AGENT_SUMMARY_MODEL", dotEnv)
+	if summaryModel == "" {
+		summaryModel = DefaultSummaryModel
+	}
 
 	maxContextMessages, err := positiveIntConfigValue("AGENT_MAX_CONTEXT_MESSAGES", dotEnv, DefaultMaxContextMessages)
 	if err != nil {
@@ -59,20 +69,31 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	maxSummaryChars, err := positiveIntConfigValue("AGENT_MAX_SUMMARY_CHARS", dotEnv, DefaultMaxSummaryChars)
+	if err != nil {
+		return Config{}, err
+	}
+	summaryInputMessages, err := positiveIntConfigValue("AGENT_SUMMARY_MAX_INPUT_MESSAGES", dotEnv, DefaultSummaryInputMessages)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
-		APIKey:             apiKey,
-		BaseURL:            baseURL,
-		Model:              model,
-		MaxContextMessages: maxContextMessages,
-		MaxMessageChars:    maxMessageChars,
-		MaxToolResultChars: maxToolResultChars,
+		APIKey:               apiKey,
+		BaseURL:              baseURL,
+		Model:                model,
+		SummaryModel:         summaryModel,
+		MaxContextMessages:   maxContextMessages,
+		MaxMessageChars:      maxMessageChars,
+		MaxToolResultChars:   maxToolResultChars,
+		MaxSummaryChars:      maxSummaryChars,
+		SummaryInputMessages: summaryInputMessages,
 	}, nil
 }
 
 // SafeString returns a display-safe representation of Config without secrets.
 func (c Config) SafeString() string {
-	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s AGENT_MAX_CONTEXT_MESSAGES=%d AGENT_MAX_MESSAGE_CHARS=%d AGENT_MAX_TOOL_RESULT_CHARS=%d", c.BaseURL, c.Model, c.MaxContextMessages, c.MaxMessageChars, c.MaxToolResultChars)
+	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s AGENT_SUMMARY_MODEL=%s AGENT_MAX_CONTEXT_MESSAGES=%d AGENT_MAX_MESSAGE_CHARS=%d AGENT_MAX_TOOL_RESULT_CHARS=%d AGENT_MAX_SUMMARY_CHARS=%d AGENT_SUMMARY_MAX_INPUT_MESSAGES=%d", c.BaseURL, c.Model, c.SummaryModel, c.MaxContextMessages, c.MaxMessageChars, c.MaxToolResultChars, c.MaxSummaryChars, c.SummaryInputMessages)
 }
 
 func configValue(key string, dotEnv map[string]string) string {

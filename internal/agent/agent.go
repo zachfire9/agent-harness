@@ -30,6 +30,7 @@ type Result struct {
 	Answer         string
 	Messages       []llm.Message
 	ContextReports []ContextReport
+	Summary        ConversationSummary
 }
 
 // New creates a runner with the default system prompt and no tools.
@@ -65,6 +66,13 @@ func NewWithToolsAndContextLimits(chatClient llm.ChatClient, model string, regis
 	return runner
 }
 
+// NewWithToolsContextLimitsAndSummarizer creates a runner with tool, context-window, and running-summary configuration.
+func NewWithToolsContextLimitsAndSummarizer(chatClient llm.ChatClient, model string, registry tools.Registry, limits ContextLimits, summarizer Summarizer) Runner {
+	runner := NewWithTools(chatClient, model, registry)
+	runner.contextManager = NewContextManagerWithSummarizer(limits, summarizer)
+	return runner
+}
+
 // Run builds message history, calls the model, executes requested tools, and
 // repeats until the model returns a final answer or the step limit is reached.
 func (r Runner) Run(ctx context.Context, prompt string) (Result, error) {
@@ -75,6 +83,12 @@ func (r Runner) Run(ctx context.Context, prompt string) (Result, error) {
 // then runs the same model/tool loop used by Run. It returns the complete
 // updated history when the turn succeeds.
 func (r Runner) RunWithHistory(ctx context.Context, history []llm.Message, prompt string) (Result, error) {
+	return r.RunWithSummary(ctx, history, ConversationSummary{}, prompt)
+}
+
+// RunWithSummary appends a new user prompt to existing conversation history and
+// uses the supplied running summary when building model-facing context.
+func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summary ConversationSummary, prompt string) (Result, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return Result{}, errors.New("prompt is required")
@@ -95,7 +109,11 @@ func (r Runner) RunWithHistory(ctx context.Context, history []llm.Message, promp
 	contextReports := []ContextReport{}
 
 	for step := 0; step < r.maxSteps; step++ {
-		snapshot := r.contextManager.Build(messages)
+		snapshot, err := r.contextManager.Build(ctx, messages, summary)
+		if err != nil {
+			return Result{}, fmt.Errorf("build model context: %w", err)
+		}
+		summary = snapshot.Summary
 		contextReports = append(contextReports, snapshot.Report)
 		request := llm.NewChatRequest(r.model, snapshot.Messages...)
 		request.Tools = toolSpecs
@@ -114,6 +132,7 @@ func (r Runner) RunWithHistory(ctx context.Context, history []llm.Message, promp
 				Answer:         response.Message.Content,
 				Messages:       messages,
 				ContextReports: contextReports,
+				Summary:        summary,
 			}, nil
 		}
 
