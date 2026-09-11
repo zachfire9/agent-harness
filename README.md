@@ -21,6 +21,7 @@ The project currently has:
 - `tool` debug command for manually executing registered tools without an LLM/API call
 - `ask` wired through the agent runner to print the assistant response
 - `chat` command for an in-memory interactive conversation that preserves history across turns while still allowing tool calls inside each turn
+- opt-in `--trace` output for model calls, context compaction reports, tool calls/results, and final-answer summaries without dumping full prompt/tool content
 
 ## Run
 
@@ -39,6 +40,14 @@ Ask with the configured model:
 ```powershell
 go run ./cmd/agent-harness ask "What is an agent?"
 ```
+
+Add `--trace` to print human-readable observability details to stderr while keeping the assistant answer on stdout:
+
+```powershell
+go run ./cmd/agent-harness ask --trace "What is an agent?"
+```
+
+Trace output includes model calls, context compaction reports, tool calls, tool result sizes, truncation metadata, and final-answer sizes. It intentionally avoids printing full prompt content, tool output, API keys, or other secret-bearing config values.
 
 Expected output is the assistant response from your configured OpenAI-compatible model, for example:
 
