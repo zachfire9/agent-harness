@@ -331,7 +331,7 @@ agent-harness/
 
 ### Step 14 — Context window management
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-14-context-window-management`
 - **Pull Request:** TBD
 - **Concept:** Stored run history and model context are different; agents need token-aware rules for deciding what gets sent back to the model.
@@ -416,10 +416,30 @@ agent-harness/
 - **Verification:**
   - `go test ./...`
 
-### Step 18 — Provider/config polish
+### Step 18 — Vector store abstraction for future RAG support
 
 - **Status:** Pending
-- **Branch:** `step-18-provider-config-polish`
+- **Branch:** `step-18-vector-store-abstraction`
+- **Pull Request:** TBD
+- **Concept:** RAG-ready applications isolate vector retrieval behind an interface before committing to a specific vector database provider.
+- **Functionality:**
+  - Add an `internal/vectorstore` package with a small provider-neutral interface for future document upserts and similarity search.
+  - Add a no-op or in-memory implementation used by default so the first app iteration does not require a real vector database.
+  - Add a small factory that selects the implementation from config, starting with `none` and failing clearly for unsupported providers.
+  - Add future-facing config placeholders such as `VECTOR_STORE_PROVIDER=none` without requiring credentials or network access.
+  - Document future provider candidates such as pgvector, Qdrant, Pinecone, Weaviate, and Chroma without adding their SDKs yet.
+- **Tests:**
+  - Default config selects the no-op/in-memory vector store.
+  - Unsupported providers return a controlled error.
+  - Agent-facing code can depend on the vector store interface instead of a concrete vendor.
+  - No test requires a real vector database or external network.
+- **Verification:**
+  - `go test ./...`
+
+### Step 19 — Provider/config polish
+
+- **Status:** Pending
+- **Branch:** `step-19-provider-config-polish`
 - **Pull Request:** TBD
 - **Concept:** Provider flexibility should be explicit and easy to verify.
 - **Functionality:**
@@ -428,20 +448,22 @@ agent-harness/
   - Improve defaults and error messages.
   - Show active model in trace/config output without exposing the API key.
   - Show configured context/message limits without exposing secrets.
+  - Show configured vector store provider without requiring vector DB credentials when the provider is `none`.
 - **Tests:**
   - Config check succeeds with valid config.
   - Config check fails clearly with invalid config.
   - Base URL normalization works.
   - Output shows model name but not API key.
   - Output shows context limits.
+  - Output shows vector store provider.
 - **Verification:**
   - `go test ./...`
   - `agent-harness config check`
 
-### Step 19 — Learning walkthrough documentation
+### Step 20 — Learning walkthrough documentation
 
 - **Status:** Pending
-- **Branch:** `step-19-learning-walkthrough-docs`
+- **Branch:** `step-20-learning-walkthrough-docs`
 - **Pull Request:** TBD
 - **Concept:** The repo should be both a working app and a learning artifact.
 - **Functionality:**

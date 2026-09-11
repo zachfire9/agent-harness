@@ -19,9 +19,10 @@ const defaultMessage = "agent-harness: staged learning CLI ready"
 
 // App holds command dependencies so CLI behavior can be tested without real API calls.
 type App struct {
-	chatClient llm.ChatClient
-	model      string
-	stdin      io.Reader
+	chatClient    llm.ChatClient
+	model         string
+	stdin         io.Reader
+	contextLimits agent.ContextLimits
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
@@ -32,6 +33,20 @@ func NewApp(chatClient llm.ChatClient, model string) App {
 // NewAppWithInput creates a CLI app with an injected chat client, model, and input stream.
 func NewAppWithInput(chatClient llm.ChatClient, model string, stdin io.Reader) App {
 	return App{chatClient: chatClient, model: model, stdin: stdin}
+}
+
+// NewAppWithConfig creates a CLI app from loaded configuration.
+func NewAppWithConfig(chatClient llm.ChatClient, cfg config.Config) App {
+	return App{
+		chatClient: chatClient,
+		model:      cfg.Model,
+		stdin:      os.Stdin,
+		contextLimits: agent.ContextLimits{
+			MaxMessages:        cfg.MaxContextMessages,
+			MaxMessageChars:    cfg.MaxMessageChars,
+			MaxToolResultChars: cfg.MaxToolResultChars,
+		},
+	}
 }
 
 // Run executes the agent-harness command and returns a process-style exit code.
@@ -46,7 +61,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	app := NewApp(llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), cfg.Model)
+	app := NewAppWithConfig(llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), cfg)
 	return app.Run(args, stdout, stderr)
 }
 
@@ -86,7 +101,7 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
 	}
-	runner := agent.NewWithTools(a.chatClient, a.model, registry)
+	runner := agent.NewWithToolsAndContextLimits(a.chatClient, a.model, registry, a.contextLimits)
 	result, err := runner.Run(context.Background(), prompt)
 	if err != nil {
 		fmt.Fprintf(stderr, "ask failed: %v\n", err)
@@ -112,7 +127,7 @@ func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
 	}
-	runner := agent.NewWithTools(a.chatClient, a.model, registry)
+	runner := agent.NewWithToolsAndContextLimits(a.chatClient, a.model, registry, a.contextLimits)
 	scanner := bufio.NewScanner(stdin)
 	var history []llm.Message
 

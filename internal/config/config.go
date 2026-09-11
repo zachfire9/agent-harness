@@ -4,19 +4,26 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
 const (
-	DefaultBaseURL = "https://api.openai.com/v1"
-	DefaultModel   = "gpt-4.1-mini"
+	DefaultBaseURL            = "https://api.openai.com/v1"
+	DefaultModel              = "gpt-4.1-mini"
+	DefaultMaxContextMessages = 40
+	DefaultMaxMessageChars    = 8000
+	DefaultMaxToolResultChars = 4000
 )
 
 // Config contains the model/provider settings needed by the agent harness.
 type Config struct {
-	APIKey  string
-	BaseURL string
-	Model   string
+	APIKey             string
+	BaseURL            string
+	Model              string
+	MaxContextMessages int
+	MaxMessageChars    int
+	MaxToolResultChars int
 }
 
 // Load reads configuration from process environment variables and an optional
@@ -40,16 +47,32 @@ func Load() (Config, error) {
 		model = DefaultModel
 	}
 
+	maxContextMessages, err := positiveIntConfigValue("AGENT_MAX_CONTEXT_MESSAGES", dotEnv, DefaultMaxContextMessages)
+	if err != nil {
+		return Config{}, err
+	}
+	maxMessageChars, err := positiveIntConfigValue("AGENT_MAX_MESSAGE_CHARS", dotEnv, DefaultMaxMessageChars)
+	if err != nil {
+		return Config{}, err
+	}
+	maxToolResultChars, err := positiveIntConfigValue("AGENT_MAX_TOOL_RESULT_CHARS", dotEnv, DefaultMaxToolResultChars)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		APIKey:  apiKey,
-		BaseURL: baseURL,
-		Model:   model,
+		APIKey:             apiKey,
+		BaseURL:            baseURL,
+		Model:              model,
+		MaxContextMessages: maxContextMessages,
+		MaxMessageChars:    maxMessageChars,
+		MaxToolResultChars: maxToolResultChars,
 	}, nil
 }
 
 // SafeString returns a display-safe representation of Config without secrets.
 func (c Config) SafeString() string {
-	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s", c.BaseURL, c.Model)
+	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s AGENT_MAX_CONTEXT_MESSAGES=%d AGENT_MAX_MESSAGE_CHARS=%d AGENT_MAX_TOOL_RESULT_CHARS=%d", c.BaseURL, c.Model, c.MaxContextMessages, c.MaxMessageChars, c.MaxToolResultChars)
 }
 
 func configValue(key string, dotEnv map[string]string) string {
@@ -58,6 +81,20 @@ func configValue(key string, dotEnv map[string]string) string {
 	}
 
 	return strings.TrimSpace(dotEnv[key])
+}
+
+func positiveIntConfigValue(key string, dotEnv map[string]string, defaultValue int) (int, error) {
+	value := configValue(key, dotEnv)
+	if value == "" {
+		return defaultValue, nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+
+	return parsed, nil
 }
 
 func loadDotEnv(path string) map[string]string {

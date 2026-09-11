@@ -127,6 +127,43 @@ OPENAI_MODEL=dotenv-model
 	}
 }
 
+func TestLoadReadsContextLimits(t *testing.T) {
+	useTempWorkingDirectory(t)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("AGENT_MAX_CONTEXT_MESSAGES", "12")
+	t.Setenv("AGENT_MAX_MESSAGE_CHARS", "2000")
+	t.Setenv("AGENT_MAX_TOOL_RESULT_CHARS", "500")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("expected config to load, got error: %v", err)
+	}
+
+	if cfg.MaxContextMessages != 12 {
+		t.Fatalf("expected max context messages from env, got %d", cfg.MaxContextMessages)
+	}
+	if cfg.MaxMessageChars != 2000 {
+		t.Fatalf("expected max message chars from env, got %d", cfg.MaxMessageChars)
+	}
+	if cfg.MaxToolResultChars != 500 {
+		t.Fatalf("expected max tool result chars from env, got %d", cfg.MaxToolResultChars)
+	}
+}
+
+func TestLoadRejectsInvalidContextLimit(t *testing.T) {
+	useTempWorkingDirectory(t)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("AGENT_MAX_CONTEXT_MESSAGES", "not-a-number")
+
+	_, err := config.Load()
+	if err == nil {
+		t.Fatal("expected invalid context limit error")
+	}
+	if !strings.Contains(err.Error(), "AGENT_MAX_CONTEXT_MESSAGES must be a positive integer") {
+		t.Fatalf("expected clear context limit error, got %q", err.Error())
+	}
+}
+
 func TestSafeStringRedactsAPIKey(t *testing.T) {
 	useTempWorkingDirectory(t)
 	t.Setenv("OPENAI_API_KEY", "secret-key")

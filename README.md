@@ -17,6 +17,7 @@ The project currently has:
 - `internal/tools` registry for named, schema-described tools
 - `echo` demo tool for deterministic tool-execution tests
 - workspace-safe `list_files`, `read_file`, and `search_files` tools with path sandboxing and output caps
+- deterministic context-window management that preserves the system prompt and original user goal, keeps recent history, and truncates oversized messages before model calls
 - `tool` debug command for manually executing registered tools without an LLM/API call
 - `ask` wired through the agent runner to print the assistant response
 - `chat` command for an in-memory interactive conversation that preserves history across turns while still allowing tool calls inside each turn
@@ -100,6 +101,14 @@ Step 03 adds configuration loading for future model calls. The app loads config 
 
 Process environment variables take precedence over values in `.env`. Only `OPENAI_API_KEY` is required. `OPENAI_BASE_URL` and `OPENAI_MODEL` have defaults.
 
+Context-window limits are optional and deterministic:
+
+- `AGENT_MAX_CONTEXT_MESSAGES` caps how many messages are sent to the model.
+- `AGENT_MAX_MESSAGE_CHARS` caps non-tool message content.
+- `AGENT_MAX_TOOL_RESULT_CHARS` caps tool-result content separately so large tool outputs cannot crowd out the conversation.
+
+The context manager preserves the system prompt and original user goal, keeps the most recent remaining messages, and appends explicit truncation notices when oversized content is shortened.
+
 ### Create an OpenAI API key
 
 Your ChatGPT Plus subscription does not cover API usage. API requests are billed separately through the OpenAI Platform.
@@ -126,6 +135,9 @@ Then edit `.env` and replace the placeholder API key:
 OPENAI_API_KEY=your-openai-api-key-here
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4.1-mini
+AGENT_MAX_CONTEXT_MESSAGES=40
+AGENT_MAX_MESSAGE_CHARS=8000
+AGENT_MAX_TOOL_RESULT_CHARS=4000
 ```
 
 `.env` is listed in `.gitignore`, so local secrets stay out of git. `.env.example` is safe to commit because it contains placeholders only.
