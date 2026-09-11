@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/zachfire9/agent-harness/internal/llm"
+
 // TraceEvent is a redacted, structured description of one observable agent step.
 type TraceEvent struct {
 	Type             string
@@ -14,6 +16,7 @@ type TraceEvent struct {
 	ToolResultChars  int
 	FinalAnswerChars int
 	ContextReport    ContextReport
+	ContextMessages  []llm.Message
 }
 
 const (

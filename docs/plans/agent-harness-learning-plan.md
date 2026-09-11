@@ -389,7 +389,7 @@ agent-harness/
 
 ### Step 16 — Run/session logging
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-16-run-session-logging`
 - **Pull Request:** TBD
 - **Concept:** Agent runs should be inspectable after the fact without forcing every stored detail back into model context.
