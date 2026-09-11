@@ -36,6 +36,11 @@ func NewAppWithInput(chatClient llm.ChatClient, model string, stdin io.Reader) A
 	return App{chatClient: chatClient, model: model, stdin: stdin}
 }
 
+// NewAppWithInputAndContextLimits creates a CLI app with injected dependencies and context limits.
+func NewAppWithInputAndContextLimits(chatClient llm.ChatClient, model string, stdin io.Reader, limits agent.ContextLimits) App {
+	return App{chatClient: chatClient, model: model, stdin: stdin, contextLimits: limits}
+}
+
 // NewAppWithConfig creates a CLI app from loaded configuration.
 func NewAppWithConfig(chatClient llm.ChatClient, summaryClient llm.ChatClient, cfg config.Config) App {
 	return App{
@@ -112,6 +117,7 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 
+	writeContextWarnings(stderr, result.ContextReports)
 	fmt.Fprintln(stdout, result.Answer)
 	return 0
 }
@@ -173,6 +179,7 @@ func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
 
 		history = result.Messages
 		summary = result.Summary
+		writeContextWarnings(stderr, result.ContextReports)
 		fmt.Fprintf(stdout, "Agent: %s\n", result.Answer)
 		pendingSummary = startSummaryJob(context.Background(), history, summary, a.contextLimits, a.summarizer)
 	}

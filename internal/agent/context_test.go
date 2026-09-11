@@ -135,6 +135,32 @@ func TestContextManagerBatchesSummaryUpdatesByConfiguredInputMessages(t *testing
 	}
 }
 
+func TestContextManagerReportsSummaryTruncation(t *testing.T) {
+	summarizer := &fakeSummarizer{returnSummary: "0123456789abcdefghijklmnopqrstuvwxyz"}
+	manager := agent.NewContextManagerWithSummarizer(agent.ContextLimits{MaxMessages: 4, MaxMessageChars: 100, MaxToolResultChars: 100, MaxSummaryChars: 20, SummaryMaxInputMessages: 10}, summarizer)
+	history := []llm.Message{
+		{Role: llm.RoleSystem, Content: "system"},
+		{Role: llm.RoleUser, Content: "original goal"},
+		{Role: llm.RoleAssistant, Content: "old answer"},
+		{Role: llm.RoleAssistant, Content: "recent answer"},
+		{Role: llm.RoleUser, Content: "latest question"},
+	}
+
+	snapshot, err := manager.Build(context.Background(), history, agent.ConversationSummary{})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+	if !strings.Contains(snapshot.Messages[2].Content, "[truncated") {
+		t.Fatalf("expected truncated summary message, got %#v", snapshot.Messages[2])
+	}
+	if len(snapshot.Report.Truncations) != 1 {
+		t.Fatalf("expected one truncation report for summary, got %#v", snapshot.Report)
+	}
+	if snapshot.Report.Truncations[0].Role != llm.RoleSystem || snapshot.Report.Truncations[0].Index != -1 {
+		t.Fatalf("expected summary truncation report with synthetic index, got %#v", snapshot.Report.Truncations[0])
+	}
+}
+
 func TestContextManagerTruncatesOversizedOlderUserMessagesWithNotice(t *testing.T) {
 	manager := agent.NewContextManager(agent.ContextLimits{MaxMessages: 10, MaxMessageChars: 12, MaxToolResultChars: 100})
 	history := []llm.Message{

@@ -345,6 +345,7 @@ agent-harness/
   - Configure `AGENT_MAX_SUMMARY_CHARS` for the inserted summary and `AGENT_SUMMARY_MAX_INPUT_MESSAGES` for per-summary-call batching; default summary input batch size is `10` with no app-enforced upper cap beyond requiring a positive integer.
   - In interactive chat, proactively start a background goroutine after each response when the next user turn is likely to require summarization; if the next user message arrives before the job completes, wait for the prepared summary before the next main LLM call.
   - Return a clear error instead of silently truncating the latest user prompt when it exceeds `AGENT_MAX_MESSAGE_CHARS`.
+  - Log every remaining hard truncation, including tool-result and inserted-summary truncation, as an explicit context warning with kept, omitted, and original character counts.
   - Keep full raw history separate from model-facing summarized context.
 - **Tests:**
   - Short histories are sent unchanged.
@@ -355,6 +356,7 @@ agent-harness/
   - Background summary jobs are started only when the next chat turn is likely to exceed limits.
   - Oversized latest user prompts return a clear error instead of being silently truncated.
   - Oversized tool results are truncated with an explicit notice.
+  - Summary and tool-result truncation events are logged clearly enough to monitor frequency and tune limits later.
   - The context manager reports omitted, summarized, and truncated context for future trace/logging.
 - **Verification:**
   - `go test ./...`

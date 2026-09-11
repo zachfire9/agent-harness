@@ -83,6 +83,7 @@ func (m ContextManager) Build(ctx context.Context, history []llm.Message, summar
 	report.SummarizedMessages = trimReport.SummarizedMessages
 	report.SummaryInserted = trimReport.SummaryInserted
 	report.SummaryModelUpdates = trimReport.SummaryModelUpdates
+	report.Truncations = append(report.Truncations, trimReport.Truncations...)
 
 	return ContextSnapshot{
 		Messages: messages,
@@ -180,7 +181,11 @@ func (m ContextManager) trimMessages(ctx context.Context, messages []llm.Message
 		trimmed = append(trimmed, messages[index])
 	}
 	if strings.TrimSpace(summary.Content) != "" && len(trimmed) < m.limits.MaxMessages {
-		trimmed = append(trimmed, m.summaryMessage(summary.Content))
+		summaryMessage, truncation := m.summaryMessage(summary.Content)
+		trimmed = append(trimmed, summaryMessage)
+		if truncation != nil {
+			report.Truncations = append(report.Truncations, *truncation)
+		}
 		report.SummaryInserted = true
 	}
 	for i, message := range messages {
@@ -222,13 +227,21 @@ func (m ContextManager) updateSummary(ctx context.Context, summary ConversationS
 	return ConversationSummary{Content: content, CoveredMessageCount: coveredThrough}, updates, nil
 }
 
-func (m ContextManager) summaryMessage(summary string) llm.Message {
+func (m ContextManager) summaryMessage(summary string) (llm.Message, *Truncation) {
 	content := summaryMessagePrefix + strings.TrimSpace(summary)
 	if m.limits.MaxSummaryChars > 0 && len(content) > m.limits.MaxSummaryChars {
-		omitted := len(content) - m.limits.MaxSummaryChars
+		originalChars := len(content)
+		omitted := originalChars - m.limits.MaxSummaryChars
 		content = content[:m.limits.MaxSummaryChars] + fmt.Sprintf(truncationNoticeFormat, omitted)
+		return llm.Message{Role: llm.RoleSystem, Content: content}, &Truncation{
+			Index:         -1,
+			Role:          llm.RoleSystem,
+			OriginalChars: originalChars,
+			KeptChars:     m.limits.MaxSummaryChars,
+			OmittedChars:  omitted,
+		}
 	}
-	return llm.Message{Role: llm.RoleSystem, Content: content}
+	return llm.Message{Role: llm.RoleSystem, Content: content}, nil
 }
 
 func omittedMessagesAfterCoverage(messages []llm.Message, selected map[int]bool, coveredCount int) ([]llm.Message, int) {
