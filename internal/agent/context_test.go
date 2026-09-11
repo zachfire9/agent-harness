@@ -135,6 +135,46 @@ func TestContextManagerBatchesSummaryUpdatesByConfiguredInputMessages(t *testing
 	}
 }
 
+func TestContextManagerTruncatesOversizedOlderUserMessagesWithNotice(t *testing.T) {
+	manager := agent.NewContextManager(agent.ContextLimits{MaxMessages: 10, MaxMessageChars: 12, MaxToolResultChars: 100})
+	history := []llm.Message{
+		{Role: llm.RoleSystem, Content: "system"},
+		{Role: llm.RoleUser, Content: "0123456789abcdefghijklmnopqrstuvwxyz"},
+		{Role: llm.RoleUser, Content: "latest question"},
+	}
+
+	snapshot, err := manager.Build(context.Background(), history, agent.ConversationSummary{})
+	if err != nil {
+		t.Fatalf("Build returned error: %v", err)
+	}
+
+	olderUserContent := snapshot.Messages[1].Content
+	if !strings.HasPrefix(olderUserContent, "0123456789ab") || !strings.Contains(olderUserContent, "[truncated") {
+		t.Fatalf("expected explicit older user truncation notice, got %q", olderUserContent)
+	}
+	if snapshot.Messages[2].Content != "latest question" {
+		t.Fatalf("expected latest user message unchanged, got %q", snapshot.Messages[2].Content)
+	}
+}
+
+func TestRunnerRejectsOversizedLatestPrompt(t *testing.T) {
+	client := &recordingClient{
+		responses: []llm.ChatResponse{{Message: llm.Message{Role: llm.RoleAssistant, Content: "should not run"}}},
+	}
+	runner := agent.NewWithContextLimits(client, "gpt-test", agent.ContextLimits{MaxMessageChars: 5})
+
+	_, err := runner.Run(context.Background(), "0123456789")
+	if err == nil {
+		t.Fatal("expected oversized prompt error")
+	}
+	if !strings.Contains(err.Error(), "prompt is too large") {
+		t.Fatalf("expected oversized prompt error, got %q", err.Error())
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("expected no model call for oversized prompt, got %d", len(client.requests))
+	}
+}
+
 func TestContextManagerTruncatesOversizedToolResultsWithNotice(t *testing.T) {
 	manager := agent.NewContextManager(agent.ContextLimits{MaxMessages: 10, MaxMessageChars: 100, MaxToolResultChars: 12})
 	history := []llm.Message{

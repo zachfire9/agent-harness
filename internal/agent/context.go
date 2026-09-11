@@ -96,12 +96,13 @@ func (m ContextManager) truncateMessages(history []llm.Message) ([]llm.Message, 
 	copy(messages, history)
 
 	report := ContextReport{}
+	latestUserIndex := latestUserMessageIndex(messages)
 	for i := range messages {
 		limit := m.limits.MaxMessageChars
 		if messages[i].Role == llm.RoleTool && m.limits.MaxToolResultChars > 0 {
 			limit = m.limits.MaxToolResultChars
 		}
-		if limit <= 0 || len(messages[i].Content) <= limit {
+		if limit <= 0 || len(messages[i].Content) <= limit || i == latestUserIndex {
 			continue
 		}
 

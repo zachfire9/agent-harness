@@ -105,6 +105,9 @@ func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summa
 		messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: r.systemPrompt})
 	}
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: prompt})
+	if err := ValidatePromptSize(prompt, r.contextManager.limits); err != nil {
+		return Result{}, err
+	}
 	toolSpecs := toolSpecsFromRegistry(r.tools)
 	contextReports := []ContextReport{}
 
