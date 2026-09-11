@@ -365,7 +365,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-15-trace-output`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/15
 - **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context compaction, running-summary, and hard-truncation decisions.
 - **Functionality:**
   - Add `--trace` flag.
