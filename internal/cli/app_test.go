@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -57,6 +58,78 @@ func TestRunAskCommandPrintsAgentAnswer(t *testing.T) {
 	}
 	if fake.request.Messages[1].Role != llm.RoleUser || fake.request.Messages[1].Content != "What is an agent?" {
 		t.Fatalf("expected user prompt message, got %#v", fake.request.Messages[1])
+	}
+}
+
+func TestRunAskCommandWithTracePrintsTraceToStderr(t *testing.T) {
+	fake := &recordingChatClient{
+		response: llm.ChatResponse{Message: llm.Message{Role: llm.RoleAssistant, Content: "trace answer"}},
+	}
+	stdout, stderr, exitCode := runApp(fake, "gpt-test", "agent-harness", "ask", "--trace", "What is an agent?")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stdout != "trace answer\n" {
+		t.Fatalf("expected answer on stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "[trace] model call step=1 model=gpt-test messages=2") {
+		t.Fatalf("expected model call trace, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "[trace] final answer step=1 chars=12") {
+		t.Fatalf("expected final answer trace, got %q", stderr)
+	}
+	if strings.Contains(stderr, "What is an agent?") {
+		t.Fatalf("trace should not dump prompt content, got %q", stderr)
+	}
+	if fake.request.Messages[1].Content != "What is an agent?" {
+		t.Fatalf("expected --trace removed from prompt, got %#v", fake.request.Messages[1])
+	}
+}
+
+func TestRunAskTraceRecordsToolCallAndResult(t *testing.T) {
+	fake := &recordingChatClient{
+		responses: []llm.ChatResponse{
+			{Message: llm.Message{Role: llm.RoleAssistant}, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "echo", Arguments: json.RawMessage(`{"message":"hello"}`)}}},
+			{Message: llm.Message{Role: llm.RoleAssistant, Content: "done"}},
+		},
+	}
+	stdout, stderr, exitCode := runApp(fake, "gpt-test", "agent-harness", "ask", "--trace", "use echo")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stdout: %s; stderr: %s", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "[trace] tool call step=1 name=echo id=call-1") {
+		t.Fatalf("expected tool call trace, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "[trace] tool result step=1 name=echo id=call-1 chars=5") {
+		t.Fatalf("expected tool result summary trace, got %q", stderr)
+	}
+}
+
+func TestRunAskTraceRecordsContextReport(t *testing.T) {
+	fake := &recordingChatClient{
+		responses: []llm.ChatResponse{
+			{Message: llm.Message{Role: llm.RoleAssistant}, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "echo", Arguments: json.RawMessage(`{"message":"abcdefghijklmnopqrstuvwxyz"}`)}}},
+			{Message: llm.Message{Role: llm.RoleAssistant, Content: "done"}},
+		},
+	}
+	stdout, stderr, exitCode := runAppWithContextLimits(fake, "gpt-test", agent.ContextLimits{MaxMessages: 10, MaxMessageChars: 100, MaxToolResultChars: 5}, "agent-harness", "ask", "--trace", "use echo")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stdout: %s; stderr: %s", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "[trace] context build step=2") {
+		t.Fatalf("expected context build trace, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "truncations=1") {
+		t.Fatalf("expected context truncation count in trace, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "[trace] context truncation step=2 role=tool") {
+		t.Fatalf("expected context truncation details in trace, got %q", stderr)
+	}
+	if strings.Contains(stderr, "abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("trace should not dump full tool result content, got %q", stderr)
 	}
 }
 
@@ -427,6 +500,16 @@ func runApp(client llm.ChatClient, model string, args ...string) (stdout string,
 	var stderrBuffer bytes.Buffer
 
 	app := cli.NewApp(client, model)
+	exitCode = app.Run(args, &stdoutBuffer, &stderrBuffer)
+
+	return stdoutBuffer.String(), stderrBuffer.String(), exitCode
+}
+
+func runAppWithContextLimits(client llm.ChatClient, model string, limits agent.ContextLimits, args ...string) (stdout string, stderr string, exitCode int) {
+	var stdoutBuffer bytes.Buffer
+	var stderrBuffer bytes.Buffer
+
+	app := cli.NewAppWithInputAndContextLimits(client, model, strings.NewReader(""), limits)
 	exitCode = app.Run(args, &stdoutBuffer, &stderrBuffer)
 
 	return stdoutBuffer.String(), stderrBuffer.String(), exitCode

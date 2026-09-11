@@ -31,6 +31,7 @@ type Result struct {
 	Messages       []llm.Message
 	ContextReports []ContextReport
 	Summary        ConversationSummary
+	TraceEvents    []TraceEvent
 }
 
 // New creates a runner with the default system prompt and no tools.
@@ -110,16 +111,34 @@ func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summa
 	}
 	toolSpecs := toolSpecsFromRegistry(r.tools)
 	contextReports := []ContextReport{}
+	traceEvents := []TraceEvent{}
 
 	for step := 0; step < r.maxSteps; step++ {
+		stepNumber := step + 1
 		snapshot, err := r.contextManager.Build(ctx, messages, summary)
 		if err != nil {
 			return Result{}, fmt.Errorf("build model context: %w", err)
 		}
 		summary = snapshot.Summary
 		contextReports = append(contextReports, snapshot.Report)
+		traceEvents = append(traceEvents, TraceEvent{
+			Type:           TraceEventContextBuild,
+			Step:           stepNumber,
+			InputMessages:  len(messages),
+			OutputMessages: len(snapshot.Messages),
+			MaxMessages:    r.contextManager.limits.MaxMessages,
+			ContextReport:  snapshot.Report,
+		})
 		request := llm.NewChatRequest(r.model, snapshot.Messages...)
 		request.Tools = toolSpecs
+		traceEvents = append(traceEvents, TraceEvent{
+			Type:           TraceEventModelCall,
+			Step:           stepNumber,
+			Model:          r.model,
+			InputMessages:  len(messages),
+			OutputMessages: len(snapshot.Messages),
+			ToolCount:      len(toolSpecs),
+		})
 
 		response, err := r.chatClient.Chat(ctx, request)
 		if err != nil {
@@ -131,15 +150,18 @@ func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summa
 		messages = append(messages, assistantMessage)
 
 		if response.IsFinalAnswer() {
+			traceEvents = append(traceEvents, TraceEvent{Type: TraceEventFinalAnswer, Step: stepNumber, FinalAnswerChars: len(response.Message.Content)})
 			return Result{
 				Answer:         response.Message.Content,
 				Messages:       messages,
 				ContextReports: contextReports,
 				Summary:        summary,
+				TraceEvents:    traceEvents,
 			}, nil
 		}
 
 		for _, toolCall := range response.ToolCalls {
+			traceEvents = append(traceEvents, TraceEvent{Type: TraceEventToolCall, Step: stepNumber, ToolName: toolCall.Name, ToolCallID: toolCall.ID})
 			tool, err := r.tools.Require(toolCall.Name)
 			if err != nil {
 				return Result{}, err
@@ -149,6 +171,7 @@ func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summa
 			if err != nil {
 				return Result{}, fmt.Errorf("tool %s failed: %w", toolCall.Name, err)
 			}
+			traceEvents = append(traceEvents, TraceEvent{Type: TraceEventToolResult, Step: stepNumber, ToolName: toolCall.Name, ToolCallID: toolCall.ID, ToolResultChars: len(toolResult)})
 
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,

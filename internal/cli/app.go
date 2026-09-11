@@ -24,6 +24,7 @@ type App struct {
 	stdin         io.Reader
 	contextLimits agent.ContextLimits
 	summarizer    agent.Summarizer
+	summaryModel  string
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
@@ -54,7 +55,8 @@ func NewAppWithConfig(chatClient llm.ChatClient, summaryClient llm.ChatClient, c
 			MaxSummaryChars:         cfg.MaxSummaryChars,
 			SummaryMaxInputMessages: cfg.SummaryInputMessages,
 		},
-		summarizer: agent.NewLLMSummarizer(summaryClient, cfg.SummaryModel),
+		summarizer:   agent.NewLLMSummarizer(summaryClient, cfg.SummaryModel),
+		summaryModel: cfg.SummaryModel,
 	}
 }
 
@@ -85,7 +87,7 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "ask":
 		return a.runAsk(args[2:], stdout, stderr)
 	case "chat":
-		return a.runChat(stdout, stderr)
+		return a.runChat(args[2:], stdout, stderr)
 	case "tool":
 		return a.runTool(args[2:], stdout, stderr)
 	default:
@@ -95,6 +97,7 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int {
+	traceEnabled, promptArgs := parseTraceFlag(promptArgs)
 	prompt := strings.TrimSpace(strings.Join(promptArgs, " "))
 	if prompt == "" {
 		fmt.Fprintln(stderr, "ask requires a prompt")
@@ -118,11 +121,16 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 	}
 
 	writeContextWarnings(stderr, result.ContextReports)
+	if traceEnabled {
+		writeTraceConfig(stderr, a)
+		writeTrace(stderr, result.TraceEvents)
+	}
 	fmt.Fprintln(stdout, result.Answer)
 	return 0
 }
 
-func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
+func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
+	traceEnabled, _ := parseTraceFlag(args)
 	if a.chatClient == nil {
 		fmt.Fprintln(stderr, "chat requires a chat client")
 		return 1
@@ -164,9 +172,17 @@ func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
 		}
 
 		if pendingSummary != nil {
+			if traceEnabled {
+				writeTraceSummaryJob(stderr, "waiting")
+			}
 			updatedSummary, err := pendingSummary.Wait(context.Background())
 			if err == nil {
 				summary = updatedSummary
+				if traceEnabled {
+					writeTraceSummaryJob(stderr, "ready")
+				}
+			} else if traceEnabled {
+				writeTraceSummaryJob(stderr, "failed")
 			}
 			pendingSummary = nil
 		}
@@ -180,8 +196,15 @@ func (a App) runChat(stdout io.Writer, stderr io.Writer) int {
 		history = result.Messages
 		summary = result.Summary
 		writeContextWarnings(stderr, result.ContextReports)
+		if traceEnabled {
+			writeTraceConfig(stderr, a)
+			writeTrace(stderr, result.TraceEvents)
+		}
 		fmt.Fprintf(stdout, "Agent: %s\n", result.Answer)
 		pendingSummary = startSummaryJob(context.Background(), history, summary, a.contextLimits, a.summarizer)
+		if traceEnabled && pendingSummary != nil {
+			writeTraceSummaryJob(stderr, "started")
+		}
 	}
 }
 

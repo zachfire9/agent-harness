@@ -363,7 +363,7 @@ agent-harness/
 
 ### Step 15 — Trace output for agent steps
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-15-trace-output`
 - **Pull Request:** TBD
 - **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context compaction, running-summary, and hard-truncation decisions.
