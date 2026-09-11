@@ -366,17 +366,22 @@ agent-harness/
 - **Status:** Pending
 - **Branch:** `step-15-trace-output`
 - **Pull Request:** TBD
-- **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context trimming decisions.
+- **Concept:** Agent systems need observability to be understandable and debuggable, including visibility into context compaction, running-summary, and hard-truncation decisions.
 - **Functionality:**
   - Add `--trace` flag.
-  - Show model calls, tool calls, tool result summaries, context trimming notices, errors, and final answer.
-  - Avoid printing secrets.
+  - Show model calls, tool calls, tool result summaries, errors, and final answer.
+  - Render `ContextReport` details before model calls when trace is enabled, including input/output message counts, max message limits, omitted message counts, summarized message counts, whether a summary was inserted, summary model update counts, and any truncation records.
+  - Show summary-specific trace details, including which summary model is configured and whether interactive chat used an already-prepared background summary or waited for a pending summary job.
+  - Keep the always-visible Step 14 `context warning` output for hard truncation, but make trace output the richer explanation of why the truncation happened.
+  - Avoid printing secrets or full oversized content in trace output.
 - **Tests:**
   - Trace disabled by default.
   - Trace records model step.
   - Trace records tool call.
   - Trace records tool result summary.
-  - Trace records context trimming notices.
+  - Trace records context compaction reports from `ContextReport`.
+  - Trace records hard truncation details without dumping full truncated content.
+  - Trace records summary/background-summary events.
   - Trace avoids leaking API key.
 - **Verification:**
   - `go test ./...`
@@ -389,12 +394,16 @@ agent-harness/
 - **Pull Request:** TBD
 - **Concept:** Agent runs should be inspectable after the fact without forcing every stored detail back into model context.
 - **Functionality:**
-  - Save full run logs as JSON under a local app directory.
-  - Include prompt, stored messages, model-context snapshots, context trimming notices, tool calls, final answer, and errors.
+  - Add durable structured run/session logs using Go's standard `log/slog` or a small app-specific JSONL event writer built around `slog`-style structured events.
+  - Save full run logs as JSON/JSONL under a local app directory.
+  - Include prompt, stored messages, model-context snapshots, `ContextReport` data, context compaction notices, truncation warnings, summary updates, tool calls, final answer, and errors.
+  - Persist hard truncation events as machine-readable records so frequency can be measured over time, with fields for role/source, message index, kept characters, omitted characters, and original characters.
+  - Keep trace output human-facing and opt-in; keep run/session logging durable and structured.
   - Redact secrets.
 - **Tests:**
   - Run log file is created.
   - Log JSON has expected fields.
+  - Context compaction and truncation events are written as structured log records.
   - Failed run logs an error.
   - Secrets are redacted.
   - Logging can be disabled if needed.
