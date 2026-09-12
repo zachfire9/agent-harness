@@ -293,10 +293,21 @@ func builtInTools() (tools.Registry, error) {
 		tools.NewListFilesTool(workspaceRoot, 0),
 		tools.NewReadFileTool(workspaceRoot, 0),
 		tools.NewSearchFilesTool(workspaceRoot, 0),
+		tools.NewRunCommandTool(defaultAllowedCommands(), 0),
 	} {
 		if err := registry.Register(tool); err != nil {
 			return tools.Registry{}, err
 		}
 	}
 	return registry, nil
+}
+
+func defaultAllowedCommands() []string {
+	return []string{
+		"pwd",
+		"git status",
+		"git status --short",
+		"git diff",
+		"go test ./...",
+	}
 }

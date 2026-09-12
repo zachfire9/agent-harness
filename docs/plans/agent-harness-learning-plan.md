@@ -412,7 +412,7 @@ agent-harness/
 
 ### Step 17 — Gated command execution tool
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-17-gated-command-tool`
 - **Pull Request:** TBD
 - **Concept:** Dangerous tools require policy, confirmation, and timeouts.

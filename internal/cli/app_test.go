@@ -382,7 +382,32 @@ func TestRunToolCommandExecutesEchoTool(t *testing.T) {
 	}
 }
 
-func TestRunToolCommandRequiresToolNameAndJSONArgs(t *testing.T) {
+func TestRunToolCommandCanExecuteGatedAllowedCommand(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "run_command", `{"command":"pwd","confirm":true}`)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, `"exit_code":0`) || !strings.Contains(stdout, `"stdout"`) {
+		t.Fatalf("expected command result JSON, got stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestRunToolCommandRejectsGatedCommandWithoutConfirmation(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "run_command", `{"command":"pwd"}`)
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "confirmation required") {
+		t.Fatalf("expected confirmation error, got %q", stderr)
+	}
+}
+
+func TestRunToolCommandRequiresNameAndJSONArgs(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
