@@ -16,7 +16,14 @@ const defaultRunCommandTimeout = 30 * time.Second
 // RunCommandTool executes a small allowlisted command after explicit confirmation.
 type RunCommandTool struct {
 	allowedCommands map[string]bool
+	allowedList     []AllowedCommand
 	timeout         time.Duration
+}
+
+// AllowedCommand describes one exact command the model may request.
+type AllowedCommand struct {
+	Command     string
+	Description string
 }
 
 type runCommandArgs struct {
@@ -32,18 +39,23 @@ type runCommandResult struct {
 }
 
 // NewRunCommandTool creates a gated command execution tool.
-func NewRunCommandTool(allowedCommands []string, timeout time.Duration) RunCommandTool {
+func NewRunCommandTool(allowedCommands []AllowedCommand, timeout time.Duration) RunCommandTool {
 	if timeout <= 0 {
 		timeout = defaultRunCommandTimeout
 	}
 	allowed := make(map[string]bool, len(allowedCommands))
-	for _, command := range allowedCommands {
-		command = normalizeCommand(command)
+	allowedList := make([]AllowedCommand, 0, len(allowedCommands))
+	for _, item := range allowedCommands {
+		command := normalizeCommand(item.Command)
 		if command != "" {
+			if allowed[command] {
+				continue
+			}
 			allowed[command] = true
+			allowedList = append(allowedList, AllowedCommand{Command: command, Description: strings.TrimSpace(item.Description)})
 		}
 	}
-	return RunCommandTool{allowedCommands: allowed, timeout: timeout}
+	return RunCommandTool{allowedCommands: allowed, allowedList: allowedList, timeout: timeout}
 }
 
 // Name returns the registry name for the gated command tool.
@@ -55,14 +67,15 @@ func (RunCommandTool) Description() string {
 }
 
 // JSONSchema declares run_command arguments.
-func (RunCommandTool) JSONSchema() map[string]any {
+func (t RunCommandTool) JSONSchema() map[string]any {
 	return map[string]any{
 		"type":     "object",
 		"required": []string{"command", "confirm"},
 		"properties": map[string]any{
 			"command": map[string]any{
 				"type":        "string",
-				"description": "Exact allowlisted command to run, such as pwd or git status",
+				"enum":        t.allowedCommandNames(),
+				"description": t.allowedCommandDescription(),
 			},
 			"confirm": map[string]any{
 				"type":        "boolean",
@@ -128,6 +141,32 @@ func (t RunCommandTool) Execute(ctx context.Context, args json.RawMessage) (stri
 		return "", fmt.Errorf("encode command result: %w", err)
 	}
 	return string(payload), nil
+}
+
+func (t RunCommandTool) allowedCommandNames() []string {
+	names := make([]string, 0, len(t.allowedList))
+	for _, item := range t.allowedList {
+		names = append(names, item.Command)
+	}
+	return names
+}
+
+func (t RunCommandTool) allowedCommandDescription() string {
+	if len(t.allowedList) == 0 {
+		return "Exact allowlisted command to run. No commands are currently allowed."
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Exact allowlisted command to run. Allowed commands:")
+	for _, item := range t.allowedList {
+		builder.WriteString("\n- ")
+		builder.WriteString(item.Command)
+		if item.Description != "" {
+			builder.WriteString(": ")
+			builder.WriteString(item.Description)
+		}
+	}
+	return builder.String()
 }
 
 func normalizeCommand(command string) string {

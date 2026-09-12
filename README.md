@@ -108,7 +108,7 @@ Debug the gated command tool with an exact allowlisted command and explicit conf
 go run ./cmd/agent-harness tool run_command '{"command":"pwd","confirm":true}'
 ```
 
-The initial allowlist is intentionally small: `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`. The tool rejects commands outside that exact allowlist, rejects calls without `confirm:true`, runs without a shell, enforces a timeout, and returns JSON containing `command`, `exit_code`, `stdout`, and `stderr`.
+The initial allowlist is intentionally small: `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`. The tool exposes that allowlist to the model as a JSON-schema enum, supports optional per-command descriptions for custom/local software, rejects commands outside that exact allowlist, rejects calls without `confirm:true`, runs without a shell, enforces a timeout, and returns JSON containing `command`, `exit_code`, `stdout`, and `stderr`.
 
 ## Configuration
 

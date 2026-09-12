@@ -302,12 +302,12 @@ func builtInTools() (tools.Registry, error) {
 	return registry, nil
 }
 
-func defaultAllowedCommands() []string {
-	return []string{
-		"pwd",
-		"git status",
-		"git status --short",
-		"git diff",
-		"go test ./...",
+func defaultAllowedCommands() []tools.AllowedCommand {
+	return []tools.AllowedCommand{
+		{Command: "pwd", Description: "Print the current working directory"},
+		{Command: "git status", Description: "Show repository status"},
+		{Command: "git status --short", Description: "Show concise repository status"},
+		{Command: "git diff", Description: "Show unstaged changes"},
+		{Command: "go test ./...", Description: "Run all Go tests in the module"},
 	}
 }

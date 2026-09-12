@@ -11,7 +11,7 @@ import (
 )
 
 func TestRunCommandToolExecutesAllowedConfirmedCommand(t *testing.T) {
-	tool := tools.NewRunCommandTool([]string{"pwd"}, time.Second)
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "pwd"}}, time.Second)
 
 	got, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"pwd","confirm":true}`))
 	if err != nil {
@@ -27,7 +27,7 @@ func TestRunCommandToolExecutesAllowedConfirmedCommand(t *testing.T) {
 }
 
 func TestRunCommandToolRejectsBlockedCommand(t *testing.T) {
-	tool := tools.NewRunCommandTool([]string{"pwd"}, time.Second)
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "pwd"}}, time.Second)
 
 	_, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"rm -rf .","confirm":true}`))
 	if err == nil {
@@ -39,7 +39,7 @@ func TestRunCommandToolRejectsBlockedCommand(t *testing.T) {
 }
 
 func TestRunCommandToolRequiresConfirmation(t *testing.T) {
-	tool := tools.NewRunCommandTool([]string{"pwd"}, time.Second)
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "pwd"}}, time.Second)
 
 	_, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"pwd"}`))
 	if err == nil {
@@ -51,7 +51,7 @@ func TestRunCommandToolRequiresConfirmation(t *testing.T) {
 }
 
 func TestRunCommandToolEnforcesTimeout(t *testing.T) {
-	tool := tools.NewRunCommandTool([]string{"sleep 1"}, time.Nanosecond)
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "sleep 1"}}, time.Nanosecond)
 
 	_, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"sleep 1","confirm":true}`))
 	if err == nil {
@@ -63,7 +63,7 @@ func TestRunCommandToolEnforcesTimeout(t *testing.T) {
 }
 
 func TestRunCommandToolCapturesStdoutAndStderr(t *testing.T) {
-	tool := tools.NewRunCommandTool([]string{"go version"}, time.Second)
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "go version"}}, time.Second)
 
 	got, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"go version","confirm":true}`))
 	if err != nil {
@@ -74,8 +74,35 @@ func TestRunCommandToolCapturesStdoutAndStderr(t *testing.T) {
 	}
 }
 
+func TestRunCommandToolSchemaIncludesAllowedCommandEnumAndDescriptions(t *testing.T) {
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{
+		{Command: "custom-index --dry-run", Description: "Validate the local custom index without writing changes"},
+		{Command: "pwd"},
+	}, time.Second)
+
+	commandSchema, ok := tool.JSONSchema()["properties"].(map[string]any)["command"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected command schema, got %#v", tool.JSONSchema())
+	}
+
+	enum, ok := commandSchema["enum"].([]string)
+	if !ok {
+		t.Fatalf("expected string enum, got %#v", commandSchema["enum"])
+	}
+	if strings.Join(enum, ",") != "custom-index --dry-run,pwd" {
+		t.Fatalf("expected enum to expose allowed commands in order, got %#v", enum)
+	}
+	description := commandSchema["description"].(string)
+	if !strings.Contains(description, "custom-index --dry-run: Validate the local custom index without writing changes") {
+		t.Fatalf("expected custom command description in schema, got %q", description)
+	}
+	if !strings.Contains(description, "\n- pwd") {
+		t.Fatalf("expected command without description to still be listed, got %q", description)
+	}
+}
+
 func TestRunCommandToolSchemaDeclaresConfirmation(t *testing.T) {
-	tool := tools.NewRunCommandTool([]string{"pwd"}, time.Second)
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "pwd"}}, time.Second)
 
 	schema := tool.JSONSchema()
 	if schema["type"] != "object" {
