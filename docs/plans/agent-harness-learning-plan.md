@@ -503,17 +503,135 @@ agent-harness/
 - **Verification:**
   - README is accurate and current.
 
-## Deferred ideas
+## Additional functionality
 
-These are intentionally not part of the first learning sequence:
+These items are intentionally not part of the first learning sequence. They are scoped as named follow-up milestones so a future PR can reference the item by name instead of by step number.
 
-- Web UI.
-- Telegram bot interface.
-- Scheduler/cron jobs.
-- GitHub issue/PR tools.
-- Multi-agent delegation.
-- Long-term memory.
-- Browser/web search tools.
+### Web UI
 
-They are good follow-up milestones once the basic local CLI agent harness is understandable and reviewable.
+- **Status:** Future
+- **Concept:** A browser interface makes agent runs easier to inspect, replay, and share than a terminal-only CLI.
+- **Functionality:**
+  - Add a small web server and frontend for starting `ask`-style runs.
+  - Show prompts, final answers, tool calls, trace events, context reports, and run-log links in a readable timeline.
+  - Support browsing previous JSONL run/session logs without exposing secrets.
+  - Keep the CLI path working as the primary low-level interface.
+- **Tests:**
+  - Server routes render or return expected responses.
+  - Run creation validates inputs and handles model/tool errors cleanly.
+  - Trace/run-log timeline formatting redacts secrets.
+  - Existing CLI tests still pass unchanged.
+- **Verification:**
+  - `go test ./...`
+  - Manual browser smoke test for starting a run and inspecting its timeline.
+
+### Telegram bot interface
+
+- **Status:** Future
+- **Concept:** A chat platform adapter should reuse the same agent runtime instead of duplicating agent logic.
+- **Functionality:**
+  - Add a Telegram transport that receives messages and sends replies through the existing agent runner.
+  - Map Telegram chats/threads to session state and run logs.
+  - Support basic commands such as help, reset session, config/status, and trace-on-demand.
+  - Redact tokens and avoid logging raw bot credentials.
+- **Tests:**
+  - Telegram update parsing handles text messages, commands, and unsupported input types.
+  - Reply generation uses fake agent/LLM clients without network calls.
+  - Session mapping is deterministic per chat/thread.
+  - Bot token/config errors are clear and secret-safe.
+- **Verification:**
+  - `go test ./...`
+  - Manual smoke test with a test bot or local webhook fixture.
+
+### Scheduler/cron jobs
+
+- **Status:** Future
+- **Concept:** Scheduled agent runs need durable job definitions, safe execution policy, and inspectable history.
+- **Functionality:**
+  - Add a scheduler for recurring or one-shot prompts/tasks.
+  - Store job definitions separately from run logs.
+  - Support enabling, disabling, listing, and manually triggering jobs.
+  - Reuse config, tools, context limits, trace, and run-log infrastructure.
+  - Prevent recursive or runaway scheduled job creation.
+- **Tests:**
+  - Job parsing accepts valid schedules and rejects invalid ones.
+  - Due-job selection is deterministic using an injected clock.
+  - Triggered jobs create run logs and handle failures without stopping the scheduler.
+  - Disabled jobs do not run.
+- **Verification:**
+  - `go test ./...`
+  - Manual smoke test with a short-lived local schedule and fake model/client.
+
+### GitHub issue/PR tools
+
+- **Status:** Future
+- **Concept:** Repository automation should be modeled as policy-gated tools with clear schemas and least-privilege credentials.
+- **Functionality:**
+  - Add tools for reading issues, reading PRs, inspecting diffs/checks, commenting, and creating issues/PRs.
+  - Gate write actions behind explicit confirmation and configuration.
+  - Keep tokens redacted in traces and run logs.
+  - Prefer read-only tools first, then add write tools incrementally.
+- **Tests:**
+  - Tool schemas describe required args and write-action confirmation fields.
+  - Read tools parse GitHub API responses using `httptest` fixtures.
+  - Write tools reject missing confirmation and unsupported actions.
+  - API errors return controlled, non-secret-leaking messages.
+- **Verification:**
+  - `go test ./...`
+  - Optional manual smoke test against a sandbox repository.
+
+### Multi-agent delegation
+
+- **Status:** Future
+- **Concept:** Larger tasks can be decomposed into bounded sub-agent runs with isolated context and explicit result handoff.
+- **Functionality:**
+  - Add a delegation abstraction for launching child agent runs with a task prompt, scoped tools, and resource limits.
+  - Record parent/child relationships in run logs.
+  - Summarize child results back into the parent run without dumping entire child histories into model context.
+  - Enforce max depth, max children, timeouts, and cancellation.
+- **Tests:**
+  - Parent runs can create child tasks through a fake delegation runner.
+  - Child failures are surfaced without corrupting parent history.
+  - Depth/child-count/time limits are enforced.
+  - Run logs preserve parent/child IDs and summaries.
+- **Verification:**
+  - `go test ./...`
+  - Manual fake-client scenario with two child tasks and one parent synthesis.
+
+### Long-term memory
+
+- **Status:** Future
+- **Concept:** Long-lived assistants need durable memory, but memory should be explicit, inspectable, and separate from raw conversation logs.
+- **Functionality:**
+  - Add a memory store for durable facts or notes selected from prior runs.
+  - Provide tools to add, search, update, and delete memory entries.
+  - Keep memory retrieval separate from raw run logs and from vector-store implementation details.
+  - Include provenance, timestamps, and source run IDs where useful.
+  - Add review/approval policy before writing memory automatically.
+- **Tests:**
+  - Memory CRUD works against a deterministic local store.
+  - Search/retrieval returns stable ranked results or exact matches.
+  - Memory write policy blocks unapproved writes when configured.
+  - Deleted or updated entries no longer appear incorrectly.
+- **Verification:**
+  - `go test ./...`
+  - Manual smoke test adding, searching, and deleting a local memory entry.
+
+### Browser/web search tools
+
+- **Status:** Future
+- **Concept:** External information tools should be sandboxed, citeable, and clearly separated from model knowledge.
+- **Functionality:**
+  - Add web search and page-fetch tools with schemas, result limits, timeouts, and user-agent/config options.
+  - Return source URLs and concise snippets rather than unbounded page dumps.
+  - Add browser-style extraction only where static fetch is insufficient.
+  - Log searched/fetched URLs while avoiding secret-bearing query strings where possible.
+- **Tests:**
+  - Search/fetch clients are tested with fake HTTP servers or fixture responses.
+  - Timeouts and non-2xx responses return controlled errors.
+  - Output caps and citation fields are enforced.
+  - Tools avoid including configured secrets in trace/run-log output.
+- **Verification:**
+  - `go test ./...`
+  - Optional manual smoke test against a harmless public page.
 
