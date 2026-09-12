@@ -443,9 +443,9 @@ agent-harness/
 
 ### Step 18 — Vector store abstraction for future RAG support
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-18-vector-store-abstraction`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/18
 - **Concept:** RAG-ready applications isolate vector retrieval behind an interface before committing to a specific vector database provider.
 - **Functionality:**
   - Add an `internal/vectorstore` package with a small provider-neutral interface for future document upserts and similarity search.

@@ -56,6 +56,9 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.RunLogDir != config.DefaultRunLogDir {
 		t.Fatalf("expected default run log dir, got %q", cfg.RunLogDir)
 	}
+	if cfg.VectorStoreProvider != config.DefaultVectorStoreProvider {
+		t.Fatalf("expected default vector store provider, got %q", cfg.VectorStoreProvider)
+	}
 }
 
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
@@ -150,6 +153,7 @@ func TestLoadReadsContextLimits(t *testing.T) {
 	t.Setenv("AGENT_SUMMARY_MODEL", "gpt-4.1-nano")
 	t.Setenv("AGENT_RUN_LOGS_ENABLED", "false")
 	t.Setenv("AGENT_RUN_LOG_DIR", "custom-runs")
+	t.Setenv("VECTOR_STORE_PROVIDER", "none")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -179,6 +183,9 @@ func TestLoadReadsContextLimits(t *testing.T) {
 	}
 	if cfg.RunLogDir != "custom-runs" {
 		t.Fatalf("expected run log dir from env, got %q", cfg.RunLogDir)
+	}
+	if cfg.VectorStoreProvider != "none" {
+		t.Fatalf("expected vector store provider from env, got %q", cfg.VectorStoreProvider)
 	}
 }
 

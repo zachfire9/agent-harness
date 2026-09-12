@@ -18,6 +18,7 @@ const (
 	DefaultMaxSummaryChars      = 2000
 	DefaultSummaryInputMessages = 10
 	DefaultRunLogDir            = ".agent-harness/runs"
+	DefaultVectorStoreProvider  = "none"
 )
 
 // Config contains the model/provider settings needed by the agent harness.
@@ -33,6 +34,7 @@ type Config struct {
 	SummaryInputMessages int
 	RunLogsEnabled       bool
 	RunLogDir            string
+	VectorStoreProvider  string
 }
 
 // Load reads configuration from process environment variables and an optional
@@ -88,6 +90,10 @@ func Load() (Config, error) {
 	if runLogDir == "" {
 		runLogDir = DefaultRunLogDir
 	}
+	vectorStoreProvider := configValue("VECTOR_STORE_PROVIDER", dotEnv)
+	if vectorStoreProvider == "" {
+		vectorStoreProvider = DefaultVectorStoreProvider
+	}
 
 	return Config{
 		APIKey:               apiKey,
@@ -101,12 +107,13 @@ func Load() (Config, error) {
 		SummaryInputMessages: summaryInputMessages,
 		RunLogsEnabled:       runLogsEnabled,
 		RunLogDir:            runLogDir,
+		VectorStoreProvider:  vectorStoreProvider,
 	}, nil
 }
 
 // SafeString returns a display-safe representation of Config without secrets.
 func (c Config) SafeString() string {
-	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s AGENT_SUMMARY_MODEL=%s AGENT_MAX_CONTEXT_MESSAGES=%d AGENT_MAX_MESSAGE_CHARS=%d AGENT_MAX_TOOL_RESULT_CHARS=%d AGENT_MAX_SUMMARY_CHARS=%d AGENT_SUMMARY_MAX_INPUT_MESSAGES=%d AGENT_RUN_LOGS_ENABLED=%t AGENT_RUN_LOG_DIR=%s", c.BaseURL, c.Model, c.SummaryModel, c.MaxContextMessages, c.MaxMessageChars, c.MaxToolResultChars, c.MaxSummaryChars, c.SummaryInputMessages, c.RunLogsEnabled, c.RunLogDir)
+	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s AGENT_SUMMARY_MODEL=%s AGENT_MAX_CONTEXT_MESSAGES=%d AGENT_MAX_MESSAGE_CHARS=%d AGENT_MAX_TOOL_RESULT_CHARS=%d AGENT_MAX_SUMMARY_CHARS=%d AGENT_SUMMARY_MAX_INPUT_MESSAGES=%d AGENT_RUN_LOGS_ENABLED=%t AGENT_RUN_LOG_DIR=%s VECTOR_STORE_PROVIDER=%s", c.BaseURL, c.Model, c.SummaryModel, c.MaxContextMessages, c.MaxMessageChars, c.MaxToolResultChars, c.MaxSummaryChars, c.SummaryInputMessages, c.RunLogsEnabled, c.RunLogDir, c.VectorStoreProvider)
 }
 
 func configValue(key string, dotEnv map[string]string) string {
