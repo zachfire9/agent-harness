@@ -487,7 +487,7 @@ agent-harness/
 
 ### Step 20 — Learning walkthrough documentation
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-20-learning-walkthrough-docs`
 - **Pull Request:** TBD
 - **Concept:** The repo should be both a working app and a learning artifact.
