@@ -52,6 +52,7 @@ func Load() (Config, error) {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
+	baseURL = normalizeBaseURL(baseURL)
 
 	model := configValue("OPENAI_MODEL", dotEnv)
 	if model == "" {
@@ -122,6 +123,10 @@ func configValue(key string, dotEnv map[string]string) string {
 	}
 
 	return strings.TrimSpace(dotEnv[key])
+}
+
+func normalizeBaseURL(value string) string {
+	return strings.TrimRight(strings.TrimSpace(value), "/")
 }
 
 func positiveIntConfigValue(key string, dotEnv map[string]string, defaultValue int) (int, error) {

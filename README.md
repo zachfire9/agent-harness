@@ -111,6 +111,14 @@ go run ./cmd/agent-harness tool run_command '{"command":"pwd","confirm":true}'
 
 The initial allowlist is intentionally small: `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`. The tool exposes that allowlist to the model as a JSON-schema enum, supports optional per-command descriptions for custom/local software, rejects commands outside that exact allowlist, rejects calls without `confirm:true`, runs without a shell, enforces a timeout, and returns JSON containing `command`, `exit_code`, `stdout`, and `stderr`.
 
+Check local configuration without making a model call:
+
+```powershell
+go run ./cmd/agent-harness config check
+```
+
+Expected output starts with `config ok` followed by a safe config summary. It shows provider/model settings, context limits, run-log settings, and the vector-store provider, but redacts the API key.
+
 ## Configuration
 
 Step 03 adds configuration loading for future model calls. The app loads config from:
@@ -119,7 +127,7 @@ Step 03 adds configuration loading for future model calls. The app loads config 
 2. A local `.env` file in the current working directory.
 3. Built-in defaults for optional values.
 
-Process environment variables take precedence over values in `.env`. Only `OPENAI_API_KEY` is required. `OPENAI_BASE_URL` and `OPENAI_MODEL` have defaults.
+Process environment variables take precedence over values in `.env`. Only `OPENAI_API_KEY` is required. `OPENAI_BASE_URL` and `OPENAI_MODEL` have defaults. Base URLs are normalized by trimming whitespace and a trailing slash, so `https://api.openai.com/v1/` becomes `https://api.openai.com/v1`.
 
 Context-window limits are optional and deterministic:
 

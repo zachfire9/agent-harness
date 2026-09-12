@@ -64,7 +64,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	useTempWorkingDirectory(t)
 	t.Setenv("OPENAI_API_KEY", "test-key")
-	t.Setenv("OPENAI_BASE_URL", "https://example.com/v1")
+	t.Setenv("OPENAI_BASE_URL", "https://example.com/v1/")
 	t.Setenv("OPENAI_MODEL", "custom-model")
 
 	cfg, err := config.Load()
@@ -77,11 +77,26 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	}
 
 	if cfg.BaseURL != "https://example.com/v1" {
-		t.Fatalf("expected base URL override, got %q", cfg.BaseURL)
+		t.Fatalf("expected normalized base URL override, got %q", cfg.BaseURL)
 	}
 
 	if cfg.Model != "custom-model" {
 		t.Fatalf("expected model override, got %q", cfg.Model)
+	}
+}
+
+func TestLoadNormalizesBaseURLWhitespaceAndTrailingSlash(t *testing.T) {
+	useTempWorkingDirectory(t)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_BASE_URL", " https://provider.example/v1/ ")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("expected config to load, got error: %v", err)
+	}
+
+	if cfg.BaseURL != "https://provider.example/v1" {
+		t.Fatalf("expected normalized base URL, got %q", cfg.BaseURL)
 	}
 }
 
