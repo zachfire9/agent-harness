@@ -443,7 +443,7 @@ agent-harness/
 
 ### Step 18 — Vector store abstraction for future RAG support
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-18-vector-store-abstraction`
 - **Pull Request:** TBD
 - **Concept:** RAG-ready applications isolate vector retrieval behind an interface before committing to a specific vector database provider.

@@ -10,7 +10,16 @@ import (
 	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/llm"
 	"github.com/zachfire9/agent-harness/internal/tools"
+	"github.com/zachfire9/agent-harness/internal/vectorstore"
 )
+
+func TestRunnerCanDependOnVectorStoreInterface(t *testing.T) {
+	runner := agent.NewWithVectorStore(&recordingClient{}, "gpt-test", vectorstore.NewNoopStore())
+
+	if runner.VectorStoreProvider() != "none" {
+		t.Fatalf("expected runner to expose vector store provider, got %q", runner.VectorStoreProvider())
+	}
+}
 
 func TestRunBuildsInitialMessageHistory(t *testing.T) {
 	client := &recordingClient{

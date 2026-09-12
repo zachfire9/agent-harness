@@ -14,6 +14,7 @@ import (
 	"github.com/zachfire9/agent-harness/internal/llm"
 	"github.com/zachfire9/agent-harness/internal/runlog"
 	"github.com/zachfire9/agent-harness/internal/tools"
+	"github.com/zachfire9/agent-harness/internal/vectorstore"
 )
 
 const defaultMessage = "agent-harness: staged learning CLI ready"
@@ -29,21 +30,22 @@ type App struct {
 	runLogDir        string
 	runLogsEnabled   bool
 	runLogSecretList []string
+	vectorStore      vectorstore.Store
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
 func NewApp(chatClient llm.ChatClient, model string) App {
-	return App{chatClient: chatClient, model: model, stdin: os.Stdin}
+	return App{chatClient: chatClient, model: model, stdin: os.Stdin, vectorStore: vectorstore.NewNoopStore()}
 }
 
 // NewAppWithInput creates a CLI app with an injected chat client, model, and input stream.
 func NewAppWithInput(chatClient llm.ChatClient, model string, stdin io.Reader) App {
-	return App{chatClient: chatClient, model: model, stdin: stdin}
+	return App{chatClient: chatClient, model: model, stdin: stdin, vectorStore: vectorstore.NewNoopStore()}
 }
 
 // NewAppWithInputAndContextLimits creates a CLI app with injected dependencies and context limits.
 func NewAppWithInputAndContextLimits(chatClient llm.ChatClient, model string, stdin io.Reader, limits agent.ContextLimits) App {
-	return App{chatClient: chatClient, model: model, stdin: stdin, contextLimits: limits}
+	return App{chatClient: chatClient, model: model, stdin: stdin, contextLimits: limits, vectorStore: vectorstore.NewNoopStore()}
 }
 
 // NewAppWithConfig creates a CLI app from loaded configuration.
@@ -64,6 +66,7 @@ func NewAppWithConfig(chatClient llm.ChatClient, summaryClient llm.ChatClient, c
 		runLogDir:        cfg.RunLogDir,
 		runLogsEnabled:   cfg.RunLogsEnabled,
 		runLogSecretList: []string{cfg.APIKey},
+		vectorStore:      vectorstore.NewNoopStore(),
 	}
 }
 
@@ -72,6 +75,14 @@ func (a App) WithRunLogging(dir string, enabled bool, secrets []string) App {
 	a.runLogDir = dir
 	a.runLogsEnabled = enabled
 	a.runLogSecretList = append([]string(nil), secrets...)
+	return a
+}
+
+// WithVectorStore returns a copy of the app configured with a vector store dependency.
+func (a App) WithVectorStore(store vectorstore.Store) App {
+	if store != nil {
+		a.vectorStore = store
+	}
 	return a
 }
 
@@ -87,7 +98,13 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	app := NewAppWithConfig(llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), cfg)
+	store, err := vectorstore.New(vectorstore.Config{Provider: cfg.VectorStoreProvider})
+	if err != nil {
+		fmt.Fprintf(stderr, "config error: %v\n", err)
+		return 1
+	}
+
+	app := NewAppWithConfig(llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), llm.NewOpenAIClient(cfg.BaseURL, cfg.APIKey), cfg).WithVectorStore(store)
 	return app.Run(args, stdout, stderr)
 }
 
@@ -136,7 +153,7 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
 	}
-	runner := agent.NewWithToolsContextLimitsAndSummarizer(a.chatClient, a.model, registry, a.contextLimits, a.summarizer)
+	runner := agent.NewWithToolsContextLimitsSummarizerAndVectorStore(a.chatClient, a.model, registry, a.contextLimits, a.summarizer, a.vectorStore)
 	result, err := runner.Run(context.Background(), prompt)
 	if err != nil {
 		writeRunError(logger, err)
@@ -177,7 +194,7 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	defer logger.Close()
 	_ = logger.Write(runlog.Event{Type: "session.start"})
-	runner := agent.NewWithToolsContextLimitsAndSummarizer(a.chatClient, a.model, registry, a.contextLimits, a.summarizer)
+	runner := agent.NewWithToolsContextLimitsSummarizerAndVectorStore(a.chatClient, a.model, registry, a.contextLimits, a.summarizer, a.vectorStore)
 	scanner := bufio.NewScanner(stdin)
 	var history []llm.Message
 	var summary agent.ConversationSummary

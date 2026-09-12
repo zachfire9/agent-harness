@@ -8,6 +8,7 @@ import (
 
 	"github.com/zachfire9/agent-harness/internal/llm"
 	"github.com/zachfire9/agent-harness/internal/tools"
+	"github.com/zachfire9/agent-harness/internal/vectorstore"
 )
 
 const (
@@ -23,6 +24,7 @@ type Runner struct {
 	tools          tools.Registry
 	maxSteps       int
 	contextManager ContextManager
+	vectorStore    vectorstore.Store
 }
 
 // Result contains the final answer and complete message history for a run.
@@ -43,7 +45,25 @@ func New(chatClient llm.ChatClient, model string) Runner {
 		tools:          tools.NewRegistry(),
 		maxSteps:       defaultMaxSteps,
 		contextManager: NewContextManager(ContextLimits{}),
+		vectorStore:    vectorstore.NewNoopStore(),
 	}
+}
+
+// NewWithVectorStore creates a runner with a provider-neutral vector store dependency.
+func NewWithVectorStore(chatClient llm.ChatClient, model string, store vectorstore.Store) Runner {
+	runner := New(chatClient, model)
+	if store != nil {
+		runner.vectorStore = store
+	}
+	return runner
+}
+
+// VectorStoreProvider returns the configured vector store provider name.
+func (r Runner) VectorStoreProvider() string {
+	if r.vectorStore == nil {
+		return vectorstore.ProviderNone
+	}
+	return r.vectorStore.Provider()
 }
 
 // NewWithTools creates a runner with the default system prompt and a tool registry.
@@ -71,6 +91,15 @@ func NewWithToolsAndContextLimits(chatClient llm.ChatClient, model string, regis
 func NewWithToolsContextLimitsAndSummarizer(chatClient llm.ChatClient, model string, registry tools.Registry, limits ContextLimits, summarizer Summarizer) Runner {
 	runner := NewWithTools(chatClient, model, registry)
 	runner.contextManager = NewContextManagerWithSummarizer(limits, summarizer)
+	return runner
+}
+
+// NewWithToolsContextLimitsSummarizerAndVectorStore creates a runner with tools, context limits, summarization, and vector-store plumbing.
+func NewWithToolsContextLimitsSummarizerAndVectorStore(chatClient llm.ChatClient, model string, registry tools.Registry, limits ContextLimits, summarizer Summarizer, store vectorstore.Store) Runner {
+	runner := NewWithToolsContextLimitsAndSummarizer(chatClient, model, registry, limits, summarizer)
+	if store != nil {
+		runner.vectorStore = store
+	}
 	return runner
 }
 

@@ -24,6 +24,7 @@ The project currently has:
 - `chat` command for an in-memory interactive conversation that preserves history across turns while still allowing tool calls inside each turn
 - opt-in `--trace` output for model calls, context compaction reports, tool calls/results, and final-answer summaries without dumping full prompt/tool content
 - durable JSONL run/session logs under the configured local run-log directory, with structured context/truncation records and secret redaction
+- provider-neutral vector store abstraction with a default `none` implementation for future RAG support without requiring a vector database yet
 
 ## Run
 
@@ -130,10 +131,13 @@ Context-window limits are optional and deterministic:
 - `AGENT_SUMMARY_MAX_INPUT_MESSAGES` controls how many newly compacted messages are sent to one summary-model update; it defaults to `10` and accepts any positive integer without an app-enforced upper cap.
 - `AGENT_RUN_LOGS_ENABLED` enables or disables durable JSONL run/session logs; it defaults to `true`.
 - `AGENT_RUN_LOG_DIR` controls where run/session logs are written; it defaults to `.agent-harness/runs`.
+- `VECTOR_STORE_PROVIDER` selects future RAG/vector database plumbing; it defaults to `none` and does not require credentials or network access.
 
 The context manager preserves the system prompt and original user goal, keeps the most recent remaining messages, updates a running summary for older omitted messages, and inserts that summary into the next model request. Interactive chat proactively starts summary updates in a background goroutine after a response when the next user turn is likely to exceed the message cap; if the next user message arrives while that update is still running, the chat waits for the prepared summary before making the next main model call. Oversized latest user prompts are rejected with a clear error instead of being silently truncated. Any remaining hard truncation, such as capped tool results or capped inserted summaries, is logged to stderr as a `context warning` with kept/omitted/original character counts so we can monitor frequency and tune the limits later.
 
 Run/session logs are durable JSONL files under `AGENT_RUN_LOG_DIR`. They record run starts, errors, final stored messages, model-context snapshots, context reports, trace events, and machine-readable `context.truncation` events. Configured secrets such as `OPENAI_API_KEY` are redacted before events are written. Disable these files with `AGENT_RUN_LOGS_ENABLED=false` when you only want stdout/stderr output.
+
+Vector store support is intentionally future-ready but disabled by default. `internal/vectorstore` defines provider-neutral document upsert and similarity-search interfaces, and `VECTOR_STORE_PROVIDER=none` selects a no-op implementation for this first app iteration. Future real providers could include pgvector, Qdrant, Pinecone, Weaviate, or Chroma without forcing the agent runner to depend on one vendor SDK today.
 
 ### Create an OpenAI API key
 
@@ -169,6 +173,7 @@ AGENT_MAX_SUMMARY_CHARS=2000
 AGENT_SUMMARY_MAX_INPUT_MESSAGES=10
 AGENT_RUN_LOGS_ENABLED=true
 AGENT_RUN_LOG_DIR=.agent-harness/runs
+VECTOR_STORE_PROVIDER=none
 ```
 
 `.env` is listed in `.gitignore`, so local secrets stay out of git. `.env.example` is safe to commit because it contains placeholders only.
