@@ -293,10 +293,21 @@ func builtInTools() (tools.Registry, error) {
 		tools.NewListFilesTool(workspaceRoot, 0),
 		tools.NewReadFileTool(workspaceRoot, 0),
 		tools.NewSearchFilesTool(workspaceRoot, 0),
+		tools.NewRunCommandTool(defaultAllowedCommands(), 0),
 	} {
 		if err := registry.Register(tool); err != nil {
 			return tools.Registry{}, err
 		}
 	}
 	return registry, nil
+}
+
+func defaultAllowedCommands() []tools.AllowedCommand {
+	return []tools.AllowedCommand{
+		{Command: "pwd", Description: "Print the current working directory"},
+		{Command: "git status", Description: "Show repository status"},
+		{Command: "git status --short", Description: "Show concise repository status"},
+		{Command: "git diff", Description: "Show unstaged changes"},
+		{Command: "go test ./...", Description: "Run all Go tests in the module"},
+	}
 }

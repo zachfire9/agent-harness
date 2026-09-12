@@ -17,6 +17,7 @@ The project currently has:
 - `internal/tools` registry for named, schema-described tools
 - `echo` demo tool for deterministic tool-execution tests
 - workspace-safe `list_files`, `read_file`, and `search_files` tools with path sandboxing and output caps
+- gated `run_command` tool with an exact-command allowlist, explicit confirmation field, timeout, and structured stdout/stderr capture
 - deterministic context-window management that preserves the system prompt and original user goal, keeps recent history, summarizes older omitted messages with a separately configured summary model, and truncates oversized messages before model calls
 - `tool` debug command for manually executing registered tools without an LLM/API call
 - `ask` wired through the agent runner to print the assistant response
@@ -100,6 +101,14 @@ go run ./cmd/agent-harness tool search_files '{"query":"agent","path":"."}'
 ```
 
 The workspace root is the directory where you run `agent-harness`. File tools reject `..` traversal and absolute paths outside that workspace, skip sensitive local files such as `.env` and `.git`, and cap long outputs with an explicit truncation notice.
+
+Debug the gated command tool with an exact allowlisted command and explicit confirmation:
+
+```powershell
+go run ./cmd/agent-harness tool run_command '{"command":"pwd","confirm":true}'
+```
+
+The initial allowlist is intentionally small: `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`. The tool exposes that allowlist to the model as a JSON-schema enum, supports optional per-command descriptions for custom/local software, rejects commands outside that exact allowlist, rejects calls without `confirm:true`, runs without a shell, enforces a timeout, and returns JSON containing `command`, `exit_code`, `stdout`, and `stderr`.
 
 ## Configuration
 

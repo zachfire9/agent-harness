@@ -412,12 +412,15 @@ agent-harness/
 
 ### Step 17 — Gated command execution tool
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-17-gated-command-tool`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/17
 - **Concept:** Dangerous tools require policy, confirmation, and timeouts.
 - **Functionality:**
   - Add `run_command(command)` tool.
+  - Add a small `AllowedCommand` descriptor for future custom/local commands, including an optional description.
+  - Expose the allowed commands to the model as a JSON-schema enum so it can choose valid commands deliberately.
+  - Include per-command descriptions in the schema when provided, while still allowing common commands with no custom description.
   - Start with an allowlist of safe commands such as:
     - `go test ./...`
     - `git status`
@@ -431,6 +434,9 @@ agent-harness/
   - Blocked command is rejected.
   - Timeout is enforced.
   - Denied confirmation does not execute.
+  - Command schema exposes the allowlist as an enum.
+  - Optional descriptions for custom commands are included in model-facing schema.
+  - Agent-facing code can still omit descriptions for obvious/common commands.
   - stdout/stderr are captured safely.
 - **Verification:**
   - `go test ./...`
