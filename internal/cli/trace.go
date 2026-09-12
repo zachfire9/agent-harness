@@ -21,7 +21,7 @@ func parseTraceFlag(args []string) (bool, []string) {
 }
 
 func writeTraceConfig(stderr io.Writer, app App) {
-	fmt.Fprintf(stderr, "[trace] config model=%s summary_model=%s max_messages=%d max_summary_input_messages=%d\n", app.model, app.summaryModel, app.contextLimits.MaxMessages, app.contextLimits.SummaryMaxInputMessages)
+	fmt.Fprintf(stderr, "[trace] config model=%s summary_model=%s max_messages=%d max_message_chars=%d max_tool_result_chars=%d max_summary_chars=%d max_summary_input_messages=%d vector_store_provider=%s\n", app.model, app.summaryModel, app.contextLimits.MaxMessages, app.contextLimits.MaxMessageChars, app.contextLimits.MaxToolResultChars, app.contextLimits.MaxSummaryChars, app.contextLimits.SummaryMaxInputMessages, app.vectorStoreProvider)
 }
 
 func writeTraceSummaryJob(stderr io.Writer, status string) {

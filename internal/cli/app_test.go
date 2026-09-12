@@ -76,6 +76,11 @@ func TestRunAskCommandWithTracePrintsTraceToStderr(t *testing.T) {
 	if !strings.Contains(stderr, "[trace] model call step=1 model=gpt-test messages=2") {
 		t.Fatalf("expected model call trace, got %q", stderr)
 	}
+	for _, want := range []string{"max_message_chars=0", "max_tool_result_chars=0", "max_summary_chars=0", "vector_store_provider=none"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("expected trace config to include %q, got %q", want, stderr)
+		}
+	}
 	if !strings.Contains(stderr, "[trace] final answer step=1 chars=12") {
 		t.Fatalf("expected final answer trace, got %q", stderr)
 	}
@@ -146,6 +151,51 @@ func TestRunAskCommandRequiresPrompt(t *testing.T) {
 
 	if !strings.Contains(stderr, "ask requires a prompt") {
 		t.Fatalf("expected helpful missing prompt error, got %q", stderr)
+	}
+}
+
+func TestRunConfigCheckPrintsSafeLoadedConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	t.Setenv("OPENAI_API_KEY", "secret-key")
+	t.Setenv("OPENAI_BASE_URL", "https://provider.example/v1/")
+	t.Setenv("OPENAI_MODEL", "custom-model")
+	t.Setenv("AGENT_MAX_CONTEXT_MESSAGES", "12")
+	t.Setenv("VECTOR_STORE_PROVIDER", "none")
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "config", "check")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, want := range []string{"config ok", "OPENAI_BASE_URL=https://provider.example/v1", "OPENAI_MODEL=custom-model", "AGENT_MAX_CONTEXT_MESSAGES=12", "VECTOR_STORE_PROVIDER=none"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected config check output to contain %q, got %q", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "secret-key") {
+		t.Fatalf("config check must not print API key, got %q", stdout)
+	}
+}
+
+func TestRunConfigCheckReturnsInvalidConfigError(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "config", "check")
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "config error: OPENAI_API_KEY is required") {
+		t.Fatalf("expected helpful config error, got %q", stderr)
 	}
 }
 

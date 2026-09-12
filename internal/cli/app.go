@@ -21,31 +21,32 @@ const defaultMessage = "agent-harness: staged learning CLI ready"
 
 // App holds command dependencies so CLI behavior can be tested without real API calls.
 type App struct {
-	chatClient       llm.ChatClient
-	model            string
-	stdin            io.Reader
-	contextLimits    agent.ContextLimits
-	summarizer       agent.Summarizer
-	summaryModel     string
-	runLogDir        string
-	runLogsEnabled   bool
-	runLogSecretList []string
-	vectorStore      vectorstore.Store
+	chatClient          llm.ChatClient
+	model               string
+	stdin               io.Reader
+	contextLimits       agent.ContextLimits
+	summarizer          agent.Summarizer
+	summaryModel        string
+	runLogDir           string
+	runLogsEnabled      bool
+	runLogSecretList    []string
+	vectorStore         vectorstore.Store
+	vectorStoreProvider string
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
 func NewApp(chatClient llm.ChatClient, model string) App {
-	return App{chatClient: chatClient, model: model, stdin: os.Stdin, vectorStore: vectorstore.NewNoopStore()}
+	return App{chatClient: chatClient, model: model, stdin: os.Stdin, vectorStore: vectorstore.NewNoopStore(), vectorStoreProvider: config.DefaultVectorStoreProvider}
 }
 
 // NewAppWithInput creates a CLI app with an injected chat client, model, and input stream.
 func NewAppWithInput(chatClient llm.ChatClient, model string, stdin io.Reader) App {
-	return App{chatClient: chatClient, model: model, stdin: stdin, vectorStore: vectorstore.NewNoopStore()}
+	return App{chatClient: chatClient, model: model, stdin: stdin, vectorStore: vectorstore.NewNoopStore(), vectorStoreProvider: config.DefaultVectorStoreProvider}
 }
 
 // NewAppWithInputAndContextLimits creates a CLI app with injected dependencies and context limits.
 func NewAppWithInputAndContextLimits(chatClient llm.ChatClient, model string, stdin io.Reader, limits agent.ContextLimits) App {
-	return App{chatClient: chatClient, model: model, stdin: stdin, contextLimits: limits, vectorStore: vectorstore.NewNoopStore()}
+	return App{chatClient: chatClient, model: model, stdin: stdin, contextLimits: limits, vectorStore: vectorstore.NewNoopStore(), vectorStoreProvider: config.DefaultVectorStoreProvider}
 }
 
 // NewAppWithConfig creates a CLI app from loaded configuration.
@@ -61,12 +62,13 @@ func NewAppWithConfig(chatClient llm.ChatClient, summaryClient llm.ChatClient, c
 			MaxSummaryChars:         cfg.MaxSummaryChars,
 			SummaryMaxInputMessages: cfg.SummaryInputMessages,
 		},
-		summarizer:       agent.NewLLMSummarizer(summaryClient, cfg.SummaryModel),
-		summaryModel:     cfg.SummaryModel,
-		runLogDir:        cfg.RunLogDir,
-		runLogsEnabled:   cfg.RunLogsEnabled,
-		runLogSecretList: []string{cfg.APIKey},
-		vectorStore:      vectorstore.NewNoopStore(),
+		summarizer:          agent.NewLLMSummarizer(summaryClient, cfg.SummaryModel),
+		summaryModel:        cfg.SummaryModel,
+		runLogDir:           cfg.RunLogDir,
+		runLogsEnabled:      cfg.RunLogsEnabled,
+		runLogSecretList:    []string{cfg.APIKey},
+		vectorStore:         vectorstore.NewNoopStore(),
+		vectorStoreProvider: cfg.VectorStoreProvider,
 	}
 }
 
@@ -88,6 +90,19 @@ func (a App) WithVectorStore(store vectorstore.Store) App {
 
 // Run executes the agent-harness command and returns a process-style exit code.
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) >= 3 && args[1] == "config" && args[2] == "check" {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintf(stderr, "config error: %v\n", err)
+			return 1
+		}
+		if _, err := vectorstore.New(vectorstore.Config{Provider: cfg.VectorStoreProvider}); err != nil {
+			fmt.Fprintf(stderr, "config error: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "config ok\n%s\n", cfg.SafeString())
+		return 0
+	}
 	if len(args) <= 1 || (args[1] != "ask" && args[1] != "chat") || (args[1] == "ask" && strings.TrimSpace(strings.Join(args[2:], " ")) == "") {
 		return App{}.Run(args, stdout, stderr)
 	}

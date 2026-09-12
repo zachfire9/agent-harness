@@ -463,9 +463,9 @@ agent-harness/
 
 ### Step 19 — Provider/config polish
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-19-provider-config-polish`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/19
 - **Concept:** Provider flexibility should be explicit and easy to verify.
 - **Functionality:**
   - Add `config check` command.
