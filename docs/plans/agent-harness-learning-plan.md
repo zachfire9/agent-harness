@@ -414,7 +414,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-17-gated-command-tool`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/17
 - **Concept:** Dangerous tools require policy, confirmation, and timeouts.
 - **Functionality:**
   - Add `run_command(command)` tool.
