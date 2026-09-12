@@ -50,6 +50,12 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.SummaryInputMessages != 10 {
 		t.Fatalf("expected default summary input messages, got %d", cfg.SummaryInputMessages)
 	}
+	if !cfg.RunLogsEnabled {
+		t.Fatal("expected run logs enabled by default")
+	}
+	if cfg.RunLogDir != config.DefaultRunLogDir {
+		t.Fatalf("expected default run log dir, got %q", cfg.RunLogDir)
+	}
 }
 
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
@@ -142,6 +148,8 @@ func TestLoadReadsContextLimits(t *testing.T) {
 	t.Setenv("AGENT_MAX_SUMMARY_CHARS", "1500")
 	t.Setenv("AGENT_SUMMARY_MAX_INPUT_MESSAGES", "25")
 	t.Setenv("AGENT_SUMMARY_MODEL", "gpt-4.1-nano")
+	t.Setenv("AGENT_RUN_LOGS_ENABLED", "false")
+	t.Setenv("AGENT_RUN_LOG_DIR", "custom-runs")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -165,6 +173,12 @@ func TestLoadReadsContextLimits(t *testing.T) {
 	}
 	if cfg.SummaryModel != "gpt-4.1-nano" {
 		t.Fatalf("expected summary model from env, got %q", cfg.SummaryModel)
+	}
+	if cfg.RunLogsEnabled {
+		t.Fatal("expected run logs disabled from env")
+	}
+	if cfg.RunLogDir != "custom-runs" {
+		t.Fatalf("expected run log dir from env, got %q", cfg.RunLogDir)
 	}
 }
 

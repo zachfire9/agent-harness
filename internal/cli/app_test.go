@@ -535,6 +535,15 @@ func runAppWithInputAndContextLimits(client llm.ChatClient, model string, limits
 	return stdoutBuffer.String(), stderrBuffer.String(), exitCode
 }
 
+func runAppInstance(app cli.App, args ...string) (stdout string, stderr string, exitCode int) {
+	var stdoutBuffer bytes.Buffer
+	var stderrBuffer bytes.Buffer
+
+	exitCode = app.Run(args, &stdoutBuffer, &stderrBuffer)
+
+	return stdoutBuffer.String(), stderrBuffer.String(), exitCode
+}
+
 func writeCLITestFile(t *testing.T, root string, relativePath string, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relativePath))

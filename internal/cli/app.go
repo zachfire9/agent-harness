@@ -12,6 +12,7 @@ import (
 	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/config"
 	"github.com/zachfire9/agent-harness/internal/llm"
+	"github.com/zachfire9/agent-harness/internal/runlog"
 	"github.com/zachfire9/agent-harness/internal/tools"
 )
 
@@ -19,12 +20,15 @@ const defaultMessage = "agent-harness: staged learning CLI ready"
 
 // App holds command dependencies so CLI behavior can be tested without real API calls.
 type App struct {
-	chatClient    llm.ChatClient
-	model         string
-	stdin         io.Reader
-	contextLimits agent.ContextLimits
-	summarizer    agent.Summarizer
-	summaryModel  string
+	chatClient       llm.ChatClient
+	model            string
+	stdin            io.Reader
+	contextLimits    agent.ContextLimits
+	summarizer       agent.Summarizer
+	summaryModel     string
+	runLogDir        string
+	runLogsEnabled   bool
+	runLogSecretList []string
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
@@ -55,9 +59,20 @@ func NewAppWithConfig(chatClient llm.ChatClient, summaryClient llm.ChatClient, c
 			MaxSummaryChars:         cfg.MaxSummaryChars,
 			SummaryMaxInputMessages: cfg.SummaryInputMessages,
 		},
-		summarizer:   agent.NewLLMSummarizer(summaryClient, cfg.SummaryModel),
-		summaryModel: cfg.SummaryModel,
+		summarizer:       agent.NewLLMSummarizer(summaryClient, cfg.SummaryModel),
+		summaryModel:     cfg.SummaryModel,
+		runLogDir:        cfg.RunLogDir,
+		runLogsEnabled:   cfg.RunLogsEnabled,
+		runLogSecretList: []string{cfg.APIKey},
 	}
+}
+
+// WithRunLogging returns a copy of the app configured for durable run/session logs.
+func (a App) WithRunLogging(dir string, enabled bool, secrets []string) App {
+	a.runLogDir = dir
+	a.runLogsEnabled = enabled
+	a.runLogSecretList = append([]string(nil), secrets...)
+	return a
 }
 
 // Run executes the agent-harness command and returns a process-style exit code.
@@ -108,6 +123,14 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 
+	logger, err := a.newRunLogger()
+	if err != nil {
+		fmt.Fprintf(stderr, "run log error: %v\n", err)
+		return 1
+	}
+	defer logger.Close()
+	writeRunStart(logger, prompt)
+
 	registry, err := builtInTools()
 	if err != nil {
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
@@ -116,10 +139,12 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 	runner := agent.NewWithToolsContextLimitsAndSummarizer(a.chatClient, a.model, registry, a.contextLimits, a.summarizer)
 	result, err := runner.Run(context.Background(), prompt)
 	if err != nil {
+		writeRunError(logger, err)
 		fmt.Fprintf(stderr, "ask failed: %v\n", err)
 		return 1
 	}
 
+	writeRunSuccess(logger, result)
 	writeContextWarnings(stderr, result.ContextReports)
 	if traceEnabled {
 		writeTraceConfig(stderr, a)
@@ -145,6 +170,13 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
 	}
+	logger, err := a.newRunLogger()
+	if err != nil {
+		fmt.Fprintf(stderr, "run log error: %v\n", err)
+		return 1
+	}
+	defer logger.Close()
+	_ = logger.Write(runlog.Event{Type: "session.start"})
 	runner := agent.NewWithToolsContextLimitsAndSummarizer(a.chatClient, a.model, registry, a.contextLimits, a.summarizer)
 	scanner := bufio.NewScanner(stdin)
 	var history []llm.Message
@@ -189,10 +221,14 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 
 		result, err := runner.RunWithSummary(context.Background(), history, summary, prompt)
 		if err != nil {
+			writeRunStart(logger, prompt)
+			writeRunError(logger, err)
 			fmt.Fprintf(stderr, "chat turn failed: %v\n", err)
 			continue
 		}
 
+		writeRunStart(logger, prompt)
+		writeRunSuccess(logger, result)
 		history = result.Messages
 		summary = result.Summary
 		writeContextWarnings(stderr, result.ContextReports)

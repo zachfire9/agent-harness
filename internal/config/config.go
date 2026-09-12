@@ -17,6 +17,7 @@ const (
 	DefaultMaxToolResultChars   = 4000
 	DefaultMaxSummaryChars      = 2000
 	DefaultSummaryInputMessages = 10
+	DefaultRunLogDir            = ".agent-harness/runs"
 )
 
 // Config contains the model/provider settings needed by the agent harness.
@@ -30,6 +31,8 @@ type Config struct {
 	MaxToolResultChars   int
 	MaxSummaryChars      int
 	SummaryInputMessages int
+	RunLogsEnabled       bool
+	RunLogDir            string
 }
 
 // Load reads configuration from process environment variables and an optional
@@ -77,6 +80,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	runLogsEnabled, err := boolConfigValue("AGENT_RUN_LOGS_ENABLED", dotEnv, true)
+	if err != nil {
+		return Config{}, err
+	}
+	runLogDir := configValue("AGENT_RUN_LOG_DIR", dotEnv)
+	if runLogDir == "" {
+		runLogDir = DefaultRunLogDir
+	}
 
 	return Config{
 		APIKey:               apiKey,
@@ -88,12 +99,14 @@ func Load() (Config, error) {
 		MaxToolResultChars:   maxToolResultChars,
 		MaxSummaryChars:      maxSummaryChars,
 		SummaryInputMessages: summaryInputMessages,
+		RunLogsEnabled:       runLogsEnabled,
+		RunLogDir:            runLogDir,
 	}, nil
 }
 
 // SafeString returns a display-safe representation of Config without secrets.
 func (c Config) SafeString() string {
-	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s AGENT_SUMMARY_MODEL=%s AGENT_MAX_CONTEXT_MESSAGES=%d AGENT_MAX_MESSAGE_CHARS=%d AGENT_MAX_TOOL_RESULT_CHARS=%d AGENT_MAX_SUMMARY_CHARS=%d AGENT_SUMMARY_MAX_INPUT_MESSAGES=%d", c.BaseURL, c.Model, c.SummaryModel, c.MaxContextMessages, c.MaxMessageChars, c.MaxToolResultChars, c.MaxSummaryChars, c.SummaryInputMessages)
+	return fmt.Sprintf("OPENAI_API_KEY=<redacted> OPENAI_BASE_URL=%s OPENAI_MODEL=%s AGENT_SUMMARY_MODEL=%s AGENT_MAX_CONTEXT_MESSAGES=%d AGENT_MAX_MESSAGE_CHARS=%d AGENT_MAX_TOOL_RESULT_CHARS=%d AGENT_MAX_SUMMARY_CHARS=%d AGENT_SUMMARY_MAX_INPUT_MESSAGES=%d AGENT_RUN_LOGS_ENABLED=%t AGENT_RUN_LOG_DIR=%s", c.BaseURL, c.Model, c.SummaryModel, c.MaxContextMessages, c.MaxMessageChars, c.MaxToolResultChars, c.MaxSummaryChars, c.SummaryInputMessages, c.RunLogsEnabled, c.RunLogDir)
 }
 
 func configValue(key string, dotEnv map[string]string) string {
@@ -116,6 +129,21 @@ func positiveIntConfigValue(key string, dotEnv map[string]string, defaultValue i
 	}
 
 	return parsed, nil
+}
+
+func boolConfigValue(key string, dotEnv map[string]string, defaultValue bool) (bool, error) {
+	value := strings.ToLower(configValue(key, dotEnv))
+	if value == "" {
+		return defaultValue, nil
+	}
+	switch value {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be a boolean", key)
+	}
 }
 
 func loadDotEnv(path string) map[string]string {

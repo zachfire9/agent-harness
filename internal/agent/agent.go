@@ -122,12 +122,13 @@ func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summa
 		summary = snapshot.Summary
 		contextReports = append(contextReports, snapshot.Report)
 		traceEvents = append(traceEvents, TraceEvent{
-			Type:           TraceEventContextBuild,
-			Step:           stepNumber,
-			InputMessages:  len(messages),
-			OutputMessages: len(snapshot.Messages),
-			MaxMessages:    r.contextManager.limits.MaxMessages,
-			ContextReport:  snapshot.Report,
+			Type:            TraceEventContextBuild,
+			Step:            stepNumber,
+			InputMessages:   len(messages),
+			OutputMessages:  len(snapshot.Messages),
+			MaxMessages:     r.contextManager.limits.MaxMessages,
+			ContextReport:   snapshot.Report,
+			ContextMessages: append([]llm.Message(nil), snapshot.Messages...),
 		})
 		request := llm.NewChatRequest(r.model, snapshot.Messages...)
 		request.Tools = toolSpecs
