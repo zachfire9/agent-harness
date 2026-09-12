@@ -489,7 +489,7 @@ agent-harness/
 
 - **Status:** Completed
 - **Branch:** `step-20-learning-walkthrough-docs`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/20
 - **Concept:** The repo should be both a working app and a learning artifact.
 - **Functionality:**
   - Expand README with a walkthrough of the completed stages.
