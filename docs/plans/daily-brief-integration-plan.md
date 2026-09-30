@@ -276,6 +276,12 @@ journalctl --user -u agent-harness-daily-brief.service -n 100 --no-pager
 
 Manual acceptance for this phase: Alf can verify from this environment whether the daily birthday-countdown email timer is enabled/running, whether the last send succeeded or errored, and can follow documented update steps after future plan PRs merge.
 
+---
+
+# Post-MVP local content milestone
+
+These phases expand the birthday-countdown email after the MVP is running reliably on this machine. They are not part of the initial MVP milestone.
+
 ## Phase 3 — Additional deterministic date section
 
 - **Status:** Pending
