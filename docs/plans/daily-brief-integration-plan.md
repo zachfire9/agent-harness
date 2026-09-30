@@ -2,11 +2,11 @@
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task after Zach approves the phase breakdown.
 
-**Goal:** Add a local-first daily brief workflow to `agent-harness` that can reproduce the current Hermes daily brief, starting with a minimal local MVP and building toward richer sources, delivery, scheduling, and optional remote deployment.
+**Goal:** Add a local-first daily brief workflow to `agent-harness`, starting with a deliberately small MVP: an agent running on this Linux machine that sends a daily email with a customizable birthday countdown. After that works reliably, expand toward the richer Hermes daily brief content, sources, delivery options, scheduling, and optional remote deployment.
 
-**Architecture:** Keep the daily brief deterministic and inspectable rather than fully agentic at first. Add a dedicated `daily-brief` command that collects sections, renders a message, persists rotation state, and later hands the message to a delivery adapter. Start by running on the same machine as Hermes/agent-harness; make storage and delivery interfaces swappable so a later AWS Lambda/EventBridge/SES deployment is possible without rewriting the brief logic.
+**Architecture:** Keep the MVP deterministic and inspectable rather than fully agentic. Add a dedicated `daily-brief` command that renders a birthday countdown message, can send it through an email delivery adapter, and can be run daily by a user-level background service/timer on the same machine as Hermes/agent-harness. Design storage, delivery, and scheduling as swappable interfaces so richer daily-brief sections and later AWS Lambda/EventBridge/SES deployment can be added without rewriting the core logic.
 
-**Tech Stack:** Go CLI, local JSON state, deterministic unit tests, injectable clock/HTTP/source/delivery interfaces, optional SMTP/email delivery, optional Google Docs API integration, optional external cron/systemd/GitHub Actions/AWS scheduling.
+**Tech Stack:** Go CLI, deterministic unit tests, injectable clock, email delivery adapter, user-level systemd service/timer for this Linux machine, later local JSON state, later HTTP/source adapters, optional Google Docs API integration, optional external cron/GitHub Actions/AWS scheduling.
 
 ---
 
@@ -21,13 +21,14 @@
 
 The live Hermes daily brief currently depends on functionality that is not yet in `agent-harness`:
 
-- Scheduled weekday/weekend execution.
-- Persistent rotating state for cards and cached lookups.
-- Google Docs ingestion for Vocabulary and Elements.
-- Dictionary/example lookup for vocabulary.
-- Wikipedia-based element extra facts and year-in-review awards data.
-- Date rendering in Spanish, Italian, French, and German.
-- Delivery to Telegram.
+- Daily scheduled execution on this machine.
+- Email delivery for the first MVP.
+- Later persistent rotating state for cards and cached lookups.
+- Later Google Docs ingestion for Vocabulary and Elements.
+- Later dictionary/example lookup for vocabulary.
+- Later Wikipedia-based element extra facts and year-in-review awards data.
+- Later date rendering in Spanish, Italian, French, and German.
+- Later Telegram delivery.
 
 ## Implementation principles
 
@@ -55,7 +56,7 @@ agent-harness/
       awards.go            # year-in-review rotation/cache
       delivery.go          # delivery interface + stdout implementation
     delivery/
-      email.go             # later SMTP/SES sender
+      email.go             # MVP SMTP/email sender, later SES/provider senders
     google/
       docs.go              # later Google Docs client
     scheduler/
@@ -72,13 +73,20 @@ Package names can be adjusted during implementation if the code reads cleaner, b
 Add local config keys over time, with `.env.example` placeholders only:
 
 ```env
-# Daily brief local-first config
-DAILY_BRIEF_STATE_PATH=.agent-harness/daily-brief-state.json
+# MVP birthday-countdown email config
 DAILY_BRIEF_BIRTHDAY=1983-10-28
 DAILY_BRIEF_TARGET_BIRTHDAY_AGE=80
 DAILY_BRIEF_TIMEZONE=America/New_York
+DAILY_BRIEF_DELIVERY=email
+DAILY_BRIEF_EMAIL_TO=<recipient@example.com>
+DAILY_BRIEF_EMAIL_FROM=<sender@example.com>
+SMTP_HOST=<smtp-host>
+SMTP_PORT=587
+SMTP_USERNAME=<smtp-username>
+SMTP_PASSWORD=<smtp-password>
 
-# MVP local source files
+# Later richer daily brief state/source config
+DAILY_BRIEF_STATE_PATH=.agent-harness/daily-brief-state.json
 DAILY_BRIEF_VOCABULARY_SOURCE=fixtures/daily-brief/vocabulary.txt
 DAILY_BRIEF_ELEMENTS_SOURCE=fixtures/daily-brief/elements.txt
 
@@ -87,15 +95,6 @@ DAILY_BRIEF_VOCABULARY_DOC_ID=<google-doc-id>
 DAILY_BRIEF_ELEMENTS_DOC_ID=<google-doc-id>
 GOOGLE_CLIENT_SECRET_PATH=<local-path>
 GOOGLE_TOKEN_PATH=<local-path>
-
-# Later email delivery
-DAILY_BRIEF_DELIVERY=stdout
-DAILY_BRIEF_EMAIL_TO=<recipient@example.com>
-DAILY_BRIEF_EMAIL_FROM=<sender@example.com>
-SMTP_HOST=<smtp-host>
-SMTP_PORT=587
-SMTP_USERNAME=<smtp-username>
-SMTP_PASSWORD=<smtp-password>
 
 # Later optional LLM polish / model routing
 DAILY_BRIEF_LLM_POLISH=false
@@ -126,12 +125,12 @@ Agree on the phased path before implementation starts.
 
 ### Review questions
 
-1. Should the MVP render the message without any model call, or should it optionally pass through the existing LLM client for light wording polish?
-2. Which cheap model/provider should be the first target for optional daily-brief polish once model calls are introduced?
-3. For the first working local run, are local text fixtures acceptable, or should Google Docs support be part of MVP?
-4. Should email delivery be SMTP first, or should we target a specific provider/API later?
-5. Should scheduling initially be external cron/systemd, or should `agent-harness` own a scheduler sooner?
-6. Should the existing daily brief state be imported, or is it OK for `agent-harness` to start its own rotation from the beginning?
+1. Which birthday/date/target age should be the default for the first countdown email?
+2. Should MVP email delivery use SMTP first, or a provider-specific API such as Gmail/SES?
+3. Should the daily run use a user-level systemd timer first, with built-in scheduler work deferred?
+4. Which email recipient/sender should be configured locally on this machine without committing secrets?
+5. Which cheap model/provider should be the first target for optional daily-brief polish later, if model calls are introduced?
+6. Should later rich daily-brief state start fresh or import the existing Hermes cron state?
 
 ### Verification
 
@@ -139,15 +138,16 @@ Agree on the phased path before implementation starts.
 
 ---
 
-# MVP milestone: local dry-run daily brief
+# MVP milestone: daily birthday-countdown email agent on this machine
 
-The MVP should let Zach run this locally:
+The scaled-down MVP should let Zach run this locally:
 
-```powershell
+```bash
 go run ./cmd/agent-harness daily-brief --dry-run
+go run ./cmd/agent-harness daily-brief --send
 ```
 
-Expected result: a complete daily brief printed to stdout, using local source files and local JSON state, with no network calls and no delivery side effects.
+Expected result: a deterministic birthday-countdown message can be previewed locally, sent by email, and then run once per day by a user-level background service/timer on the Linux machine this agent is running on. The MVP should not require Google Docs, Telegram, AWS, local source files, card rotations, or any model calls.
 
 ## Phase 1 — CLI skeleton and config
 
@@ -157,15 +157,17 @@ Expected result: a complete daily brief printed to stdout, using local source fi
 
 ### Objective
 
-Add a `daily-brief` command with `--dry-run`, config loading, injected clock support, and placeholder docs, but no real brief content yet.
+Add a `daily-brief` command with `--dry-run`, config loading, injected clock support, and the first real MVP content: a customizable birthday countdown message. No model calls, Google Docs, rotations, or rich content yet.
 
 ### Scope
 
 - Add command parsing for:
   - `agent-harness daily-brief --dry-run`
+  - `agent-harness daily-brief --send`
   - `agent-harness daily-brief --help`
-- Add config fields for state path, timezone, birthday, and target birthday age.
-- Add `.env.example` placeholders.
+- Add config fields for timezone, birthday, target birthday age, delivery mode, and email placeholders.
+- Render a plain-text birthday countdown message, for example days remaining until the configured target birthday.
+- Add `.env.example` placeholders without committing real email addresses or SMTP credentials.
 - Keep `daily-brief` independent from the agent/LLM runner for now.
 
 ### Files
@@ -175,26 +177,30 @@ Add a `daily-brief` command with `--dry-run`, config loading, injected clock sup
 - Modify: `internal/config/config_test.go`
 - Create: `internal/brief/brief.go`
 - Create: `internal/brief/brief_test.go`
+- Create: `internal/brief/dates.go`
+- Create: `internal/brief/dates_test.go`
 - Modify: `.env.example`
 - Modify: `README.md`
 
 ### Tests
 
-- CLI accepts `daily-brief --dry-run`.
+- CLI accepts `daily-brief --dry-run`, `daily-brief --send`, and `daily-brief --help`.
 - Missing optional daily-brief config falls back to safe defaults.
 - Invalid timezone fails clearly.
 - Invalid birthday format fails clearly.
+- Known-date countdown test cases are deterministic.
+- Leap-year/date-boundary cases are covered.
 - Existing commands still work.
 
 ### Verification
 
-```powershell
+```bash
 go test ./...
 go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
 
-## Phase 2 — Local background service on this machine
+## Phase 2 — Email delivery and local background service on this machine
 
 - **Status:** Pending
 - **Branch:** `step-22-agent-harness-background-service`
@@ -202,41 +208,48 @@ go run ./cmd/agent-harness daily-brief --dry-run
 
 ### Objective
 
-Make `agent-harness` installable and runnable as a long-lived background process on the Linux machine this agent currently runs on, with clear install, start, update, status, and log/error verification instructions.
+Make `agent-harness` installable and runnable on the Linux machine this agent currently runs on, with email delivery for the birthday-countdown MVP plus clear install, start, daily timer, update, status, and log/error verification instructions.
 
 ### Scope
 
+- Add a `Sender` interface plus stdout and SMTP/email sender implementations for the MVP countdown message.
 - Add documented Linux user-service install path for this machine, using systemd user services by default so root is not required.
 - Build/install the `agent-harness` binary to a stable user-owned path such as `~/.local/bin/agent-harness`.
-- Add a service unit example for running an `agent-harness` background command once one exists, with an initial placeholder/no-op or status-capable command if needed.
+- Add systemd user service and timer examples that run `agent-harness daily-brief --send` once per day.
 - Add explicit startup commands:
   - `systemctl --user daemon-reload`
-  - `systemctl --user enable --now agent-harness.service`
+  - `systemctl --user enable --now agent-harness-daily-brief.timer`
   - optional `loginctl enable-linger $USER` if the service must survive logout/reboot and Zach approves the user-level persistence behavior.
 - Add explicit update commands for future changes:
   - `git -C /home/alf/projects/agent-harness pull --ff-only`
   - `go test ./...`
   - `go build -o ~/.local/bin/agent-harness ./cmd/agent-harness`
-  - `systemctl --user restart agent-harness.service`
+  - `systemctl --user restart agent-harness-daily-brief.service`
 - Add verification commands that Alf can run from this environment:
-  - `systemctl --user status agent-harness.service --no-pager`
-  - `systemctl --user is-active agent-harness.service`
-  - `journalctl --user -u agent-harness.service -n 100 --no-pager`
+  - `systemctl --user status agent-harness-daily-brief.timer --no-pager`
+  - `systemctl --user status agent-harness-daily-brief.service --no-pager`
+  - `systemctl --user is-active agent-harness-daily-brief.timer`
+  - `journalctl --user -u agent-harness-daily-brief.service -n 100 --no-pager`
   - a future app-level health/status command, such as `agent-harness status` or `agent-harness jobs list`, once implemented.
 - Document how to distinguish healthy, stopped, failed, restart-looping, and config-error states from `systemctl`/`journalctl` output.
 - Keep secrets and local machine paths out of committed defaults; committed docs may use this machine's repo path as an example because the requested first deployment target is this agent host.
 
 ### Files
 
+- Create: `internal/brief/delivery.go`
+- Create: `internal/brief/delivery_test.go`
 - Create: `docs/local-background-service.md`
-- Maybe create: `deploy/systemd/agent-harness.service.example`
+- Maybe create: `deploy/systemd/agent-harness-daily-brief.service.example`
+- Maybe create: `deploy/systemd/agent-harness-daily-brief.timer.example`
 - Modify: `README.md`
 - Modify: `.gitignore` if runtime directories such as `.agent-harness/` need to stay local-only
 - Maybe modify: `internal/cli/app.go` if a minimal `status` command or long-running placeholder command is needed for verification
 
 ### Tests
 
-- Service unit example contains the expected installed binary path or documented placeholder.
+- Email sender uses fake SMTP/server in tests and does not send real email during unit tests.
+- Delivery failure exits non-zero and is visible in logs.
+- Service/timer examples contain the expected installed binary path and `daily-brief --send` command.
 - Install/update docs include test/build/restart/status/log commands.
 - Any added `status` command has deterministic tests and exits non-zero on invalid config.
 - Existing CLI commands continue to work.
@@ -247,13 +260,14 @@ Make `agent-harness` installable and runnable as a long-lived background process
 go test ./...
 go build -o ~/.local/bin/agent-harness ./cmd/agent-harness
 systemctl --user daemon-reload
-systemctl --user status agent-harness.service --no-pager
-journalctl --user -u agent-harness.service -n 100 --no-pager
+systemctl --user status agent-harness-daily-brief.timer --no-pager
+systemctl --user status agent-harness-daily-brief.service --no-pager
+journalctl --user -u agent-harness-daily-brief.service -n 100 --no-pager
 ```
 
-Manual acceptance for this phase: Alf can verify from this environment whether the app service is running, stopped, or erroring, and can follow documented update steps after future plan PRs merge.
+Manual acceptance for this phase: Alf can verify from this environment whether the daily birthday-countdown email timer is enabled/running, whether the last send succeeded or errored, and can follow documented update steps after future plan PRs merge.
 
-## Phase 3 — Deterministic date and birthday section
+## Phase 3 — Additional deterministic date section
 
 - **Status:** Pending
 - **Branch:** `step-23-daily-brief-dates`
@@ -261,28 +275,26 @@ Manual acceptance for this phase: Alf can verify from this environment whether t
 
 ### Objective
 
-Render the first part of the brief deterministically: birthday countdown plus Spanish/Italian/French/German date lines.
+Extend the MVP countdown with optional deterministic date presentation: Spanish/Italian/French/German date lines. The birthday countdown itself already exists in the MVP.
 
 ### Scope
 
-- Add injected clock/date helper.
-- Compute days until Oct 28, 2063 from the configured timezone.
+- Reuse the injected clock/date helper from the MVP countdown.
 - Render weekday/month/day words in four languages.
-- Avoid LLM dependence for date wording.
+- Keep this optional formatting deterministic and independent from LLMs.
 
 ### Files
 
-- Create: `internal/brief/dates.go`
-- Create: `internal/brief/dates_test.go`
+- Modify: `internal/brief/dates.go`
+- Modify: `internal/brief/dates_test.go`
 - Modify: `internal/brief/brief.go`
 - Modify: `README.md`
 
 ### Tests
 
-- Known-date countdown test cases.
-- Leap-year/date-boundary cases.
 - Spanish, Italian, French, and German date line snapshots for known dates.
 - Timezone boundary case around UTC vs Eastern date.
+- Existing birthday countdown tests keep passing.
 
 ### Verification
 
@@ -342,7 +354,7 @@ go run ./cmd/agent-harness daily-brief --state-path .agent-harness/test-daily-br
 
 ### Objective
 
-Render a complete no-network MVP brief using local text files for vocabulary and element cards.
+Add the first post-MVP rich daily-brief content using local text files for vocabulary and element cards.
 
 ### Scope
 
@@ -377,7 +389,7 @@ Render a complete no-network MVP brief using local text files for vocabulary and
 - Elements parse heading/facts correctly.
 - Elements rotate top-down.
 - Empty source files fail with a helpful error.
-- Final MVP output contains date, vocabulary, and knowledge-refresh sections.
+- Final rich-content output contains date, vocabulary, and knowledge-refresh sections.
 
 ### Verification
 
@@ -388,11 +400,11 @@ go run ./cmd/agent-harness daily-brief --dry-run
 
 ---
 
-# Delivery milestone: local machine sends the brief
+# Delivery milestone: harden local-machine delivery
 
-This milestone keeps execution on the current machine. Scheduling can be external at first.
+This milestone keeps execution on the current machine and improves reliability after the MVP email/timer path exists.
 
-## Phase 6 — Email delivery adapter
+## Phase 6 — Rich daily brief delivery safeguards
 
 - **Status:** Pending
 - **Branch:** `step-26-daily-brief-email-delivery`
@@ -400,32 +412,29 @@ This milestone keeps execution on the current machine. Scheduling can be externa
 
 ### Objective
 
-Allow the local command to send the rendered brief by email, while keeping stdout/dry-run as the default safe path.
+Harden delivery behavior before richer sections start depending on stateful rotations or external sources.
 
 ### Scope
 
-- Add a `Sender` interface.
-- Add stdout sender.
-- Add SMTP sender or provider-specific email sender after review.
-- Add `--send` flag.
-- Do not advance state if delivery fails.
-- Keep secrets out of traces/run logs.
+- Ensure `--dry-run` remains the default safe path for all richer content.
+- Ensure state only advances after successful delivery when stateful sections are enabled.
+- Add subject/body rendering conventions for richer brief sections.
+- Redact SMTP credentials in logs and errors.
+- Document how failed sends appear in `journalctl` on this machine.
 
 ### Files
 
-- Create: `internal/brief/delivery.go`
-- Create: `internal/brief/delivery_test.go`
-- Create or modify: `internal/delivery/email.go`
-- Create or modify: `internal/delivery/email_test.go`
+- Modify: `internal/brief/delivery.go`
+- Modify: `internal/brief/delivery_test.go`
+- Create or modify: `internal/delivery/email.go` if not already created in Phase 2
+- Create or modify: `internal/delivery/email_test.go` if not already created in Phase 2
 - Modify: `internal/config/config.go`
-- Modify: `.env.example`
 - Modify: `README.md`
 
 ### Tests
 
 - Dry-run prints only and does not send.
-- Fake sender receives expected subject/body.
-- Missing email config fails clearly when `--send` is used.
+- Fake sender receives expected rich-content subject/body.
 - Delivery failure does not advance state.
 - Delivery success advances state.
 - Secrets are not included in error output.
@@ -539,7 +548,7 @@ Choose one data strategy during implementation review:
 2. **Wikipedia fetch/cache** matching the current Hermes script.
 3. **Hybrid:** committed seed data plus optional refresh command.
 
-Recommended MVP for reliability: static data file first, optional refresh later.
+Recommended post-MVP approach for reliability: static data file first, optional refresh later.
 
 ### Files
 
@@ -766,21 +775,19 @@ EventBridge Scheduler -> Lambda Go binary -> SES/email
 
 ## Open decisions before implementation
 
-- Whether MVP should use local text sources or Google Docs immediately.
-- Whether email should use SMTP, Gmail API, SES, or another provider.
-- Whether state should start fresh or import the existing Hermes cron state.
-- Whether to keep the current exact wording/format or make deterministic formatting the source of truth.
+- Which birthday/date/target age should be the default for the first countdown email.
+- Whether MVP email delivery should use SMTP, Gmail API, SES, or another provider.
+- Whether to enable user-level linger for this machine so the timer survives logout/reboot.
+- Whether later rich daily-brief state should start fresh or import the existing Hermes cron state.
+- Whether to keep the later rich daily-brief exact wording/format or make deterministic formatting the source of truth.
 - Whether to add the built-in scheduler before or after Google Docs/enrichment.
 - Which cheap provider/model should scheduled daily-brief polish use first, if optional polish is enabled.
 
 ## Suggested first approved scope
 
-If Zach approves, start with these five PRs only:
+If Zach approves, start with these two PRs only:
 
-1. **Phase 1:** CLI skeleton and config.
-2. **Phase 2:** Local background service on this machine.
-3. **Phase 3:** Deterministic date and birthday section.
-4. **Phase 4:** Local JSON state and rotation helpers.
-5. **Phase 5:** Local source files for Vocabulary and Elements.
+1. **Phase 1:** CLI skeleton/config plus deterministic birthday-countdown rendering.
+2. **Phase 2:** Email delivery plus user-level systemd service/timer on this machine.
 
-That gives a real local MVP plus a documented, verifiable background runtime on this machine without network calls, secrets, delivery risk, or AWS. After that works, add email delivery and external scheduling.
+That gives the scaled-down MVP: a verifiable local agent running on this machine that sends a daily birthday-countdown email, without Google Docs, Telegram, AWS, card rotations, rich sources, or model calls. After that works, add stateful/richer daily brief content incrementally.
