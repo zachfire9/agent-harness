@@ -153,7 +153,7 @@ go run ./cmd/agent-harness daily-brief --send
 
 Expected result: a deterministic birthday-countdown message can be previewed locally, sent by email, and then run once per day by a user-level background service/timer on the Linux machine this agent is running on. The MVP should not require Google Docs, Telegram, AWS, local source files, card rotations, or any model calls.
 
-## Phase 1 — CLI skeleton and config
+## Phase 1 — Birthday countdown CLI and config
 
 - **Status:** Pending
 - **Branch:** `step-21-daily-brief-cli-skeleton`
@@ -204,7 +204,7 @@ go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
 
-## Phase 2 — Email delivery and local background service on this machine
+## Phase 2 — Daily birthday countdown email and local background service
 
 - **Status:** Pending
 - **Branch:** `step-22-agent-harness-background-service`
@@ -802,7 +802,7 @@ EventBridge Scheduler -> Lambda Go binary -> SES/email
 
 If Zach approves, start with these two PRs only:
 
-1. **Phase 1:** CLI skeleton/config plus deterministic birthday-countdown rendering.
-2. **Phase 2:** Gmail API email delivery plus user-level systemd service/timer on this machine.
+1. **Phase 1:** Birthday countdown CLI/config plus deterministic rendering.
+2. **Phase 2:** Daily birthday countdown email via Gmail API plus user-level systemd service/timer on this machine.
 
 That gives the scaled-down MVP: a verifiable local agent running on this machine that sends a daily birthday-countdown email, without Google Docs, Telegram, AWS, card rotations, rich sources, or model calls. After that works, add stateful/richer daily brief content incrementally.
