@@ -34,7 +34,7 @@ The live Hermes daily brief currently depends on functionality that is not yet i
 - **Local-first:** The first working version should run on the same Linux machine where this agent is running, from the repo checkout or an installed binary.
 - **No remote dependency for MVP:** Do not require AWS, Docker, a database, Telegram, or Google Docs for the first useful version.
 - **Deterministic before agentic:** Use deterministic Go code for date math, rotations, source parsing, and rendering. Use the LLM only later, if we decide it adds value.
-- **Cost-aware model use:** Do not assume every daily-brief step needs the same Codex/high-end account or model. Prefer no model call for deterministic sections, cheap/mini models for optional formatting/classification/summarization, and reserve expensive reasoning/code models for development-time coding tasks or genuinely hard synthesis.
+- **Cost-aware scheduled runs:** Recurring daily brief runs should default to deterministic/no-model execution. Optional wording polish, classification, or summarization must route through an explicitly configured cheap/mini model profile; do not reuse the Codex/high-end development account/model for routine scheduled briefs unless Zach deliberately opts in for a specific feature. Record model/profile/token/cost metadata when model calls happen, without logging secrets or full prompts by default.
 - **Swappable adapters:** Brief source, state storage, delivery, and scheduling should be interfaces so local files can become Google Docs, stdout can become email/Telegram, and local JSON can become S3/DynamoDB later.
 - **Public-safe repo:** Keep real document IDs, email addresses, tokens, SMTP passwords, and delivery targets out of committed files. Use placeholders in `.env.example` and docs.
 - **Test each phase:** Every implementation phase should include unit tests and a manual smoke command.
@@ -103,6 +103,16 @@ DAILY_BRIEF_MODEL_PROFILE=cheap
 DAILY_BRIEF_CHEAP_MODEL=<provider/model-for-low-cost-formatting>
 DAILY_BRIEF_FALLBACK_MODEL=<provider/model-for-fallbacks>
 ```
+
+## Cost policy for scheduled brief runs
+
+Scheduled daily brief runs should be designed as the cheapest reliable path, not as miniature coding-agent sessions:
+
+- **Default:** no model call. Date math, rotations, source parsing, caching, validation, and templated rendering stay deterministic.
+- **Optional polish:** if wording polish, short summarization, or classification becomes useful, enable it explicitly with `DAILY_BRIEF_LLM_POLISH=true` and route it through `DAILY_BRIEF_MODEL_PROFILE=cheap` / `DAILY_BRIEF_CHEAP_MODEL`.
+- **Fallbacks:** `DAILY_BRIEF_FALLBACK_MODEL` is for temporary cheap-provider failures or quality regressions, not the normal path.
+- **High-end models:** Codex/high-end reasoning models are for development-time implementation or genuinely hard synthesis, not routine scheduled brief delivery unless Zach explicitly opts in.
+- **Observability:** when a model is called, log model profile, model name, token counts, and estimated cost where available; do not log API keys, credentials, full prompts, or private source content by default.
 
 ## Phase 0 — Review and refine this plan
 
@@ -579,7 +589,7 @@ go run ./cmd/agent-harness daily-brief --dry-run
 
 These phases can be reordered based on what feels most useful after the local email version works.
 
-## Phase 11 — Cost-aware model routing and optional LLM polish mode
+## Phase 11 — Scheduled-run cost controls and optional LLM polish mode
 
 - **Status:** Pending
 - **Branch:** `step-31-daily-brief-cost-aware-llm-polish`
@@ -701,6 +711,7 @@ EventBridge Scheduler -> Lambda Go binary -> SES/email
 - Whether state should start fresh or import the existing Hermes cron state.
 - Whether to keep the current exact wording/format or make deterministic formatting the source of truth.
 - Whether to add the built-in scheduler before or after Google Docs/enrichment.
+- Which cheap provider/model should scheduled daily-brief polish use first, if optional polish is enabled.
 
 ## Suggested first approved scope
 
