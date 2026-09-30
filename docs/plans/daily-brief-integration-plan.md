@@ -36,7 +36,7 @@ The live Hermes daily brief currently depends on functionality that is not yet i
 - **No remote dependency for MVP:** Do not require AWS, Docker, a database, Telegram, or Google Docs for the first useful version.
 - **Deterministic before agentic:** Use deterministic Go code for date math, rotations, source parsing, and rendering. Use the LLM only later, if we decide it adds value.
 - **Cost-aware scheduled runs:** Recurring daily brief runs should default to deterministic/no-model execution. Optional wording polish, classification, or summarization must route through an explicitly configured cheap/mini model profile; do not reuse the Codex/high-end development account/model for routine scheduled briefs unless Zach deliberately opts in for a specific feature. Record model/profile/token/cost metadata when model calls happen, without logging secrets or full prompts by default.
-- **Swappable adapters:** Brief source, state storage, delivery, and scheduling should be interfaces so local files can become Google Docs, stdout can become email/Telegram, and local JSON can become S3/DynamoDB later.
+- **Swappable adapters:** Brief source, state storage, delivery, and scheduling should be interfaces so document sources can be faked in tests, Google Docs can back runtime Vocabulary/Elements content, stdout can become email/Telegram, and local JSON can become S3/DynamoDB later.
 - **Public-safe repo:** Keep real document IDs, email addresses, tokens, SMTP passwords, and delivery targets out of committed files. Use placeholders in `.env.example` and docs.
 - **Test each phase:** Every implementation phase should include unit tests and a manual smoke command.
 
@@ -50,7 +50,7 @@ agent-harness/
       render.go            # final message rendering
       dates.go             # birthday countdown + multilingual date words
       state.go             # local JSON state and rotation cursors
-      sources.go           # source interfaces and fixture/local-file sources
+      sources.go           # source interfaces for document-backed sources
       vocabulary.go        # vocabulary parsing/rotation/enrichment hooks
       elements.go          # elements parsing/rotation/enrichment hooks
       awards.go            # year-in-review rotation/cache
@@ -58,7 +58,7 @@ agent-harness/
     delivery/
       email.go             # MVP SMTP/email sender, later SES/provider senders
     google/
-      docs.go              # later Google Docs client
+      docs.go              # Google Docs client for Vocabulary/Elements
     scheduler/
       ...                  # later local job runner, if needed
   docs/
@@ -90,12 +90,10 @@ SMTP_PORT=587
 SMTP_USERNAME=<smtp-username>
 SMTP_PASSWORD=<smtp-password>
 
-# Later richer daily brief state/source config
+# Later richer daily brief state config
 DAILY_BRIEF_STATE_PATH=.agent-harness/daily-brief-state.json
-DAILY_BRIEF_VOCABULARY_SOURCE=fixtures/daily-brief/vocabulary.txt
-DAILY_BRIEF_ELEMENTS_SOURCE=fixtures/daily-brief/elements.txt
 
-# Later Google Docs sources
+# Later Google Docs-backed Vocabulary/Elements sources
 DAILY_BRIEF_VOCABULARY_DOC_ID=<google-doc-id>
 DAILY_BRIEF_ELEMENTS_DOC_ID=<google-doc-id>
 # Reuse GOOGLE_CLIENT_SECRET_PATH and GOOGLE_TOKEN_PATH from the MVP Gmail config above.
@@ -361,68 +359,16 @@ go run ./cmd/agent-harness daily-brief --dry-run
 go run ./cmd/agent-harness daily-brief --state-path .agent-harness/test-daily-brief-state.json
 ```
 
-## Phase 5 — Local source files for Vocabulary and Elements
-
-- **Status:** Pending
-- **Branch:** `step-25-daily-brief-local-sources`
-- **Pull Request:** TBD
-
-### Objective
-
-Add the first post-MVP rich daily-brief content using local text files for vocabulary and element cards.
-
-### Scope
-
-- Add source interfaces.
-- Add local text-file source implementation.
-- Add test fixtures for vocabulary and elements.
-- Parse Elements in the current heading/fact style:
-  - heading like `1 - Hydrogen`
-  - following lines as facts
-- Parse Vocabulary one word per non-empty line, bottom-up.
-- Render a vocabulary section with the word and placeholder definition/example text until enrichment is added.
-- Render an Elements section with up to five facts.
-
-### Files
-
-- Create: `internal/brief/sources.go`
-- Create: `internal/brief/sources_test.go`
-- Create: `internal/brief/vocabulary.go`
-- Create: `internal/brief/vocabulary_test.go`
-- Create: `internal/brief/elements.go`
-- Create: `internal/brief/elements_test.go`
-- Create: `internal/brief/testdata/vocabulary.txt`
-- Create: `internal/brief/testdata/elements.txt`
-- Modify: `internal/brief/brief.go`
-- Modify: `.env.example`
-- Modify: `README.md`
-
-### Tests
-
-- Vocabulary reads bottom-up.
-- Duplicate vocabulary words dedupe case-insensitively.
-- Elements parse heading/facts correctly.
-- Elements rotate top-down.
-- Empty source files fail with a helpful error.
-- Final rich-content output contains date, vocabulary, and knowledge-refresh sections.
-
-### Verification
-
-```powershell
-go test ./...
-go run ./cmd/agent-harness daily-brief --dry-run
-```
-
 ---
 
 # Delivery milestone: harden local-machine delivery
 
 This milestone keeps execution on the current machine and improves reliability after the MVP email/timer path exists.
 
-## Phase 6 — Rich daily brief delivery safeguards
+## Phase 5 — Rich daily brief delivery safeguards
 
 - **Status:** Pending
-- **Branch:** `step-26-daily-brief-email-delivery`
+- **Branch:** `step-25-daily-brief-email-delivery`
 - **Pull Request:** TBD
 
 ### Objective
@@ -462,10 +408,10 @@ go run ./cmd/agent-harness daily-brief --dry-run
 go run ./cmd/agent-harness daily-brief --send
 ```
 
-## Phase 7 — External local scheduling docs
+## Phase 6 — External local scheduling docs
 
 - **Status:** Pending
-- **Branch:** `step-27-daily-brief-local-scheduling-docs`
+- **Branch:** `step-26-daily-brief-local-scheduling-docs`
 - **Pull Request:** TBD
 
 ### Objective
@@ -501,6 +447,66 @@ go test ./...
 # Source/enrichment milestone: match the current Hermes content
 
 This milestone adds the dynamic data currently handled by `daily_knowledge_refresh.py`.
+
+## Phase 7 — Google Docs source adapter
+
+- **Status:** Pending
+- **Branch:** `step-27-daily-brief-google-docs-sources`
+- **Pull Request:** TBD
+
+### Objective
+
+Add Vocabulary and Elements as Google Docs-backed rich daily-brief sections. Do not implement local text-file sources for these sections; local files may only appear as test fixtures for parser/client tests.
+
+### Scope
+
+- Add a `DocumentSource` interface if not already present.
+- Add Google Docs client using configured OAuth token/client-secret paths.
+- Read Vocabulary and Elements from configured Google Doc IDs.
+- Parse Vocabulary from Google Docs text one word per non-empty line, bottom-up.
+- Parse Elements from Google Docs text in the current heading/fact style:
+  - heading like `1 - Hydrogen`
+  - following lines as facts
+- Render a vocabulary section with the word and placeholder definition/example text until enrichment is added.
+- Render an Elements section with up to five facts.
+- Do not add or document a local-file source mode for runtime content.
+- Do not commit real doc IDs, token paths, downloaded doc content, or exported local copies.
+- Add config validation and docs.
+
+### Files
+
+- Create: `internal/google/docs.go`
+- Create: `internal/google/docs_test.go`
+- Create: `internal/brief/sources.go`
+- Create: `internal/brief/sources_test.go`
+- Create: `internal/brief/vocabulary.go`
+- Create: `internal/brief/vocabulary_test.go`
+- Create: `internal/brief/elements.go`
+- Create: `internal/brief/elements_test.go`
+- Modify: `internal/brief/brief.go`
+- Modify: `internal/config/config.go`
+- Modify: `.env.example`
+- Modify: `README.md`
+
+### Tests
+
+- Google Docs response fixtures parse expected text without requiring live network calls.
+- Auth/config errors are clear and secret-safe.
+- Source selection requires Google Docs config when Vocabulary/Elements are enabled.
+- Vocabulary reads bottom-up from Google Docs text.
+- Duplicate vocabulary words dedupe case-insensitively.
+- Elements parse heading/facts correctly from Google Docs text.
+- Elements rotate top-down using existing state helpers.
+- Empty Google Docs content fails with a helpful error.
+- Final rich-content output contains date, vocabulary, and knowledge-refresh sections once Google Docs-backed sections are enabled.
+
+### Verification
+
+```powershell
+go test ./...
+go run ./cmd/agent-harness daily-brief --dry-run
+```
+
 
 ## Phase 8 — Vocabulary definitions and example sentences
 
@@ -626,57 +632,16 @@ go test ./...
 go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
-## Phase 11 — Google Docs source adapter
-
-- **Status:** Pending
-- **Branch:** `step-31-daily-brief-google-docs-sources`
-- **Pull Request:** TBD
-
-### Objective
-
-Read Vocabulary and Elements directly from Google Docs instead of local files.
-
-### Scope
-
-- Add a `DocumentSource` interface if not already present.
-- Add Google Docs client using configured OAuth token/client-secret paths.
-- Keep local files as a fallback/testable option.
-- Do not commit real doc IDs or token paths.
-- Add config validation and docs.
-
-### Files
-
-- Create: `internal/google/docs.go`
-- Create: `internal/google/docs_test.go`
-- Modify: `internal/brief/sources.go`
-- Modify: `internal/config/config.go`
-- Modify: `.env.example`
-- Modify: `README.md`
-
-### Tests
-
-- Google Docs response fixture parses expected text.
-- Auth/config errors are clear and secret-safe.
-- Local source mode still works without Google credentials.
-- Source selection from config is deterministic.
-
-### Verification
-
-```powershell
-go test ./...
-go run ./cmd/agent-harness daily-brief --dry-run
-```
-
 ---
 
 # Agent/scheduler/platform milestone: build beyond MVP
 
 These phases can be reordered based on what feels most useful after the local email version works.
 
-## Phase 12 — Scheduled-run cost controls and optional LLM polish mode
+## Phase 11 — Scheduled-run cost controls and optional LLM polish mode
 
 - **Status:** Pending
-- **Branch:** `step-32-daily-brief-cost-aware-llm-polish`
+- **Branch:** `step-31-daily-brief-cost-aware-llm-polish`
 - **Pull Request:** TBD
 
 ### Objective
@@ -705,10 +670,10 @@ Define how the daily brief chooses no-model, cheap-model, and fallback-model pat
 - Prompt includes “do not add outside facts” constraint.
 - Trace/run-log metadata records model/profile without exposing API keys or raw credentials.
 
-## Phase 13 — Built-in scheduler/job runner
+## Phase 12 — Built-in scheduler/job runner
 
 - **Status:** Pending
-- **Branch:** `step-33-scheduler-run-due`
+- **Branch:** `step-32-scheduler-run-due`
 - **Pull Request:** TBD
 
 ### Objective
@@ -730,10 +695,10 @@ Add generic scheduled job support to `agent-harness`, using daily brief as the f
 - Disabled jobs do not run.
 - Job failure records state/logs without stopping other jobs.
 
-## Phase 14 — Telegram delivery adapter
+## Phase 13 — Telegram delivery adapter
 
 - **Status:** Pending
-- **Branch:** `step-34-daily-brief-telegram-delivery`
+- **Branch:** `step-33-daily-brief-telegram-delivery`
 - **Pull Request:** TBD
 
 ### Objective
@@ -753,10 +718,10 @@ Add Telegram delivery as an alternative to email/stdout.
 - Missing token/target fails clearly.
 - Delivery errors do not advance state.
 
-## Phase 15 — Remote deployment option
+## Phase 14 — Remote deployment option
 
 - **Status:** Pending
-- **Branch:** `step-35-daily-brief-remote-deployment-plan`
+- **Branch:** `step-34-daily-brief-remote-deployment-plan`
 - **Pull Request:** TBD
 
 ### Objective
