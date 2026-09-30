@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the MVP deterministic and inspectable rather than fully agentic. Add a dedicated `daily-brief` command that renders a birthday countdown message, can send it through an email delivery adapter, and can be run daily by a user-level background service/timer on the same machine as Hermes/agent-harness. Design storage, delivery, and scheduling as swappable interfaces so richer daily-brief sections and later AWS Lambda/EventBridge/SES deployment can be added without rewriting the core logic.
 
-**Tech Stack:** Go CLI, deterministic unit tests, injectable clock, email delivery adapter, user-level systemd service/timer for this Linux machine, later local JSON state, later HTTP/source adapters, optional Google Docs API integration, optional external cron/GitHub Actions/AWS scheduling.
+**Tech Stack:** Go CLI, deterministic unit tests, injectable clock, Gmail API/OAuth email delivery adapter, user-level systemd service/timer for this Linux machine, later local JSON state, later HTTP/source adapters, optional Google Docs API integration, optional SMTP/SES fallback, optional external cron/GitHub Actions/AWS scheduling.
 
 ---
 
@@ -78,8 +78,13 @@ DAILY_BRIEF_BIRTHDAY=1983-10-28
 DAILY_BRIEF_TARGET_BIRTHDAY_AGE=80
 DAILY_BRIEF_TIMEZONE=America/New_York
 DAILY_BRIEF_DELIVERY=email
+DAILY_BRIEF_EMAIL_PROVIDER=gmail_api
 DAILY_BRIEF_EMAIL_TO=<recipient@example.com>
 DAILY_BRIEF_EMAIL_FROM=<sender@example.com>
+GOOGLE_CLIENT_SECRET_PATH=<local-path-to-oauth-client-secret-json>
+GOOGLE_TOKEN_PATH=<local-path-to-oauth-token-json>
+
+# Optional fallback email provider, not the MVP default
 SMTP_HOST=<smtp-host>
 SMTP_PORT=587
 SMTP_USERNAME=<smtp-username>
@@ -93,8 +98,7 @@ DAILY_BRIEF_ELEMENTS_SOURCE=fixtures/daily-brief/elements.txt
 # Later Google Docs sources
 DAILY_BRIEF_VOCABULARY_DOC_ID=<google-doc-id>
 DAILY_BRIEF_ELEMENTS_DOC_ID=<google-doc-id>
-GOOGLE_CLIENT_SECRET_PATH=<local-path>
-GOOGLE_TOKEN_PATH=<local-path>
+# Reuse GOOGLE_CLIENT_SECRET_PATH and GOOGLE_TOKEN_PATH from the MVP Gmail config above.
 
 # Later optional LLM polish / model routing
 DAILY_BRIEF_LLM_POLISH=false
@@ -126,7 +130,7 @@ Agree on the phased path before implementation starts.
 ### Review questions
 
 1. Which birthday/date/target age should be the default for the first countdown email?
-2. Should MVP email delivery use SMTP first, or a provider-specific API such as Gmail/SES?
+2. Should the MVP Gmail sender use the existing local Google OAuth token/client-secret paths on this machine, or create a separate `agent-harness` OAuth credential location?
 3. Should the daily run use a user-level systemd timer first, with built-in scheduler work deferred?
 4. Which email recipient/sender should be configured locally on this machine without committing secrets?
 5. Which cheap model/provider should be the first target for optional daily-brief polish later, if model calls are introduced?
@@ -165,7 +169,7 @@ Add a `daily-brief` command with `--dry-run`, config loading, injected clock sup
   - `agent-harness daily-brief --dry-run`
   - `agent-harness daily-brief --send`
   - `agent-harness daily-brief --help`
-- Add config fields for timezone, birthday, target birthday age, delivery mode, and email placeholders.
+- Add config fields for timezone, birthday, target birthday age, delivery mode, Gmail email provider, sender/recipient, and local Google OAuth credential paths.
 - Render a plain-text birthday countdown message, for example days remaining until the configured target birthday.
 - Add `.env.example` placeholders without committing real email addresses or SMTP credentials.
 - Keep `daily-brief` independent from the agent/LLM runner for now.
@@ -212,7 +216,9 @@ Make `agent-harness` installable and runnable on the Linux machine this agent cu
 
 ### Scope
 
-- Add a `Sender` interface plus stdout and SMTP/email sender implementations for the MVP countdown message.
+- Add a `Sender` interface plus stdout and Gmail API sender implementations for the MVP countdown message.
+- Use Google OAuth credentials from local config paths such as `GOOGLE_CLIENT_SECRET_PATH` and `GOOGLE_TOKEN_PATH`; do not commit tokens, client secrets, sender addresses, or recipients.
+- Keep SMTP/SES as later fallback providers, not the default MVP path.
 - Add documented Linux user-service install path for this machine, using systemd user services by default so root is not required.
 - Build/install the `agent-harness` binary to a stable user-owned path such as `~/.local/bin/agent-harness`.
 - Add systemd user service and timer examples that run `agent-harness daily-brief --send` once per day.
@@ -238,6 +244,8 @@ Make `agent-harness` installable and runnable on the Linux machine this agent cu
 
 - Create: `internal/brief/delivery.go`
 - Create: `internal/brief/delivery_test.go`
+- Create: `internal/delivery/gmail.go`
+- Create: `internal/delivery/gmail_test.go`
 - Create: `docs/local-background-service.md`
 - Maybe create: `deploy/systemd/agent-harness-daily-brief.service.example`
 - Maybe create: `deploy/systemd/agent-harness-daily-brief.timer.example`
@@ -247,7 +255,8 @@ Make `agent-harness` installable and runnable on the Linux machine this agent cu
 
 ### Tests
 
-- Email sender uses fake SMTP/server in tests and does not send real email during unit tests.
+- Gmail sender uses a fake Gmail API/client in tests and does not send real email during unit tests.
+- Missing/invalid Google OAuth config fails clearly when `--send` is used with `DAILY_BRIEF_EMAIL_PROVIDER=gmail_api`.
 - Delivery failure exits non-zero and is visible in logs.
 - Service/timer examples contain the expected installed binary path and `daily-brief --send` command.
 - Install/update docs include test/build/restart/status/log commands.
@@ -776,7 +785,7 @@ EventBridge Scheduler -> Lambda Go binary -> SES/email
 ## Open decisions before implementation
 
 - Which birthday/date/target age should be the default for the first countdown email.
-- Whether MVP email delivery should use SMTP, Gmail API, SES, or another provider.
+- Whether the MVP Gmail sender should reuse this machine's existing Google OAuth token/client-secret paths or use a separate `agent-harness` credential location.
 - Whether to enable user-level linger for this machine so the timer survives logout/reboot.
 - Whether later rich daily-brief state should start fresh or import the existing Hermes cron state.
 - Whether to keep the later rich daily-brief exact wording/format or make deterministic formatting the source of truth.
@@ -788,6 +797,6 @@ EventBridge Scheduler -> Lambda Go binary -> SES/email
 If Zach approves, start with these two PRs only:
 
 1. **Phase 1:** CLI skeleton/config plus deterministic birthday-countdown rendering.
-2. **Phase 2:** Email delivery plus user-level systemd service/timer on this machine.
+2. **Phase 2:** Gmail API email delivery plus user-level systemd service/timer on this machine.
 
 That gives the scaled-down MVP: a verifiable local agent running on this machine that sends a daily birthday-countdown email, without Google Docs, Telegram, AWS, card rotations, rich sources, or model calls. After that works, add stateful/richer daily brief content incrementally.
