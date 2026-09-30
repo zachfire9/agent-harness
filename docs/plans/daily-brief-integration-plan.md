@@ -193,10 +193,70 @@ go test ./...
 go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
-## Phase 2 — Deterministic date and birthday section
+
+## Phase 2 — Local background service on this machine
 
 - **Status:** Pending
-- **Branch:** `step-22-daily-brief-dates`
+- **Branch:** `step-22-agent-harness-background-service`
+- **Pull Request:** TBD
+
+### Objective
+
+Make `agent-harness` installable and runnable as a long-lived background process on the Linux machine this agent currently runs on, with clear install, start, update, status, and log/error verification instructions.
+
+### Scope
+
+- Add documented Linux user-service install path for this machine, using systemd user services by default so root is not required.
+- Build/install the `agent-harness` binary to a stable user-owned path such as `~/.local/bin/agent-harness`.
+- Add a service unit example for running an `agent-harness` background command once one exists, with an initial placeholder/no-op or status-capable command if needed.
+- Add explicit startup commands:
+  - `systemctl --user daemon-reload`
+  - `systemctl --user enable --now agent-harness.service`
+  - optional `loginctl enable-linger $USER` if the service must survive logout/reboot and Zach approves the user-level persistence behavior.
+- Add explicit update commands for future changes:
+  - `git -C /home/alf/projects/agent-harness pull --ff-only`
+  - `go test ./...`
+  - `go build -o ~/.local/bin/agent-harness ./cmd/agent-harness`
+  - `systemctl --user restart agent-harness.service`
+- Add verification commands that Alf can run from this environment:
+  - `systemctl --user status agent-harness.service --no-pager`
+  - `systemctl --user is-active agent-harness.service`
+  - `journalctl --user -u agent-harness.service -n 100 --no-pager`
+  - a future app-level health/status command, such as `agent-harness status` or `agent-harness jobs list`, once implemented.
+- Document how to distinguish healthy, stopped, failed, restart-looping, and config-error states from `systemctl`/`journalctl` output.
+- Keep secrets and local machine paths out of committed defaults; committed docs may use this machine's repo path as an example because the requested first deployment target is this agent host.
+
+### Files
+
+- Create: `docs/local-background-service.md`
+- Maybe create: `deploy/systemd/agent-harness.service.example`
+- Modify: `README.md`
+- Modify: `.gitignore` if runtime directories such as `.agent-harness/` need to stay local-only
+- Maybe modify: `internal/cli/app.go` if a minimal `status` command or long-running placeholder command is needed for verification
+
+### Tests
+
+- Service unit example contains the expected installed binary path or documented placeholder.
+- Install/update docs include test/build/restart/status/log commands.
+- Any added `status` command has deterministic tests and exits non-zero on invalid config.
+- Existing CLI commands continue to work.
+
+### Verification
+
+```bash
+go test ./...
+go build -o ~/.local/bin/agent-harness ./cmd/agent-harness
+systemctl --user daemon-reload
+systemctl --user status agent-harness.service --no-pager
+journalctl --user -u agent-harness.service -n 100 --no-pager
+```
+
+Manual acceptance for this phase: Alf can verify from this environment whether the app service is running, stopped, or erroring, and can follow documented update steps after future plan PRs merge.
+
+## Phase 3 — Deterministic date and birthday section
+
+- **Status:** Pending
+- **Branch:** `step-23-daily-brief-dates`
 - **Pull Request:** TBD
 
 ### Objective
@@ -231,10 +291,10 @@ go test ./...
 go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
-## Phase 3 — Local JSON state and rotation helpers
+## Phase 4 — Local JSON state and rotation helpers
 
 - **Status:** Pending
-- **Branch:** `step-23-daily-brief-state`
+- **Branch:** `step-24-daily-brief-state`
 - **Pull Request:** TBD
 
 ### Objective
@@ -274,10 +334,10 @@ go run ./cmd/agent-harness daily-brief --dry-run
 go run ./cmd/agent-harness daily-brief --state-path .agent-harness/test-daily-brief-state.json
 ```
 
-## Phase 4 — Local source files for Vocabulary and Elements
+## Phase 5 — Local source files for Vocabulary and Elements
 
 - **Status:** Pending
-- **Branch:** `step-24-daily-brief-local-sources`
+- **Branch:** `step-25-daily-brief-local-sources`
 - **Pull Request:** TBD
 
 ### Objective
@@ -332,10 +392,10 @@ go run ./cmd/agent-harness daily-brief --dry-run
 
 This milestone keeps execution on the current machine. Scheduling can be external at first.
 
-## Phase 5 — Email delivery adapter
+## Phase 6 — Email delivery adapter
 
 - **Status:** Pending
-- **Branch:** `step-25-daily-brief-email-delivery`
+- **Branch:** `step-26-daily-brief-email-delivery`
 - **Pull Request:** TBD
 
 ### Objective
@@ -378,10 +438,10 @@ go run ./cmd/agent-harness daily-brief --dry-run
 go run ./cmd/agent-harness daily-brief --send
 ```
 
-## Phase 6 — External local scheduling docs
+## Phase 7 — External local scheduling docs
 
 - **Status:** Pending
-- **Branch:** `step-26-daily-brief-local-scheduling-docs`
+- **Branch:** `step-27-daily-brief-local-scheduling-docs`
 - **Pull Request:** TBD
 
 ### Objective
@@ -418,10 +478,10 @@ go test ./...
 
 This milestone adds the dynamic data currently handled by `daily_knowledge_refresh.py`.
 
-## Phase 7 — Vocabulary definitions and example sentences
+## Phase 8 — Vocabulary definitions and example sentences
 
 - **Status:** Pending
-- **Branch:** `step-27-daily-brief-vocabulary-enrichment`
+- **Branch:** `step-28-daily-brief-vocabulary-enrichment`
 - **Pull Request:** TBD
 
 ### Objective
@@ -461,10 +521,10 @@ go test ./...
 go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
-## Phase 8 — Year-in-review awards section
+## Phase 9 — Year-in-review awards section
 
 - **Status:** Pending
-- **Branch:** `step-28-daily-brief-awards-section`
+- **Branch:** `step-29-daily-brief-awards-section`
 - **Pull Request:** TBD
 
 ### Objective
@@ -505,10 +565,10 @@ go test ./...
 go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
-## Phase 9 — Element extra fact enrichment
+## Phase 10 — Element extra fact enrichment
 
 - **Status:** Pending
-- **Branch:** `step-29-daily-brief-element-extra-fact`
+- **Branch:** `step-30-daily-brief-element-extra-fact`
 - **Pull Request:** TBD
 
 ### Objective
@@ -542,10 +602,10 @@ go test ./...
 go run ./cmd/agent-harness daily-brief --dry-run
 ```
 
-## Phase 10 — Google Docs source adapter
+## Phase 11 — Google Docs source adapter
 
 - **Status:** Pending
-- **Branch:** `step-30-daily-brief-google-docs-sources`
+- **Branch:** `step-31-daily-brief-google-docs-sources`
 - **Pull Request:** TBD
 
 ### Objective
@@ -589,10 +649,10 @@ go run ./cmd/agent-harness daily-brief --dry-run
 
 These phases can be reordered based on what feels most useful after the local email version works.
 
-## Phase 11 — Scheduled-run cost controls and optional LLM polish mode
+## Phase 12 — Scheduled-run cost controls and optional LLM polish mode
 
 - **Status:** Pending
-- **Branch:** `step-31-daily-brief-cost-aware-llm-polish`
+- **Branch:** `step-32-daily-brief-cost-aware-llm-polish`
 - **Pull Request:** TBD
 
 ### Objective
@@ -621,10 +681,10 @@ Define how the daily brief chooses no-model, cheap-model, and fallback-model pat
 - Prompt includes “do not add outside facts” constraint.
 - Trace/run-log metadata records model/profile without exposing API keys or raw credentials.
 
-## Phase 12 — Built-in scheduler/job runner
+## Phase 13 — Built-in scheduler/job runner
 
 - **Status:** Pending
-- **Branch:** `step-32-scheduler-run-due`
+- **Branch:** `step-33-scheduler-run-due`
 - **Pull Request:** TBD
 
 ### Objective
@@ -646,10 +706,10 @@ Add generic scheduled job support to `agent-harness`, using daily brief as the f
 - Disabled jobs do not run.
 - Job failure records state/logs without stopping other jobs.
 
-## Phase 13 — Telegram delivery adapter
+## Phase 14 — Telegram delivery adapter
 
 - **Status:** Pending
-- **Branch:** `step-33-daily-brief-telegram-delivery`
+- **Branch:** `step-34-daily-brief-telegram-delivery`
 - **Pull Request:** TBD
 
 ### Objective
@@ -669,10 +729,10 @@ Add Telegram delivery as an alternative to email/stdout.
 - Missing token/target fails clearly.
 - Delivery errors do not advance state.
 
-## Phase 14 — Remote deployment option
+## Phase 15 — Remote deployment option
 
 - **Status:** Pending
-- **Branch:** `step-34-daily-brief-remote-deployment-plan`
+- **Branch:** `step-35-daily-brief-remote-deployment-plan`
 - **Pull Request:** TBD
 
 ### Objective
@@ -715,11 +775,12 @@ EventBridge Scheduler -> Lambda Go binary -> SES/email
 
 ## Suggested first approved scope
 
-If Zach approves, start with these four PRs only:
+If Zach approves, start with these five PRs only:
 
 1. **Phase 1:** CLI skeleton and config.
-2. **Phase 2:** Deterministic date and birthday section.
-3. **Phase 3:** Local JSON state and rotation helpers.
-4. **Phase 4:** Local source files for Vocabulary and Elements.
+2. **Phase 2:** Local background service on this machine.
+3. **Phase 3:** Deterministic date and birthday section.
+4. **Phase 4:** Local JSON state and rotation helpers.
+5. **Phase 5:** Local source files for Vocabulary and Elements.
 
-That gives a real local MVP without network calls, secrets, delivery risk, or AWS. After that works, add email delivery and external scheduling.
+That gives a real local MVP plus a documented, verifiable background runtime on this machine without network calls, secrets, delivery risk, or AWS. After that works, add email delivery and external scheduling.
