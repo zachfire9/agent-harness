@@ -561,6 +561,175 @@ func TestRunChatLogsContextTruncationWarning(t *testing.T) {
 	}
 }
 
+func TestRunServiceInstallWritesSystemdUserTemplate(t *testing.T) {
+	configHome := t.TempDir()
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "service", "install", "--config-home", configHome)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	unitPath := filepath.Join(configHome, "systemd", "user", "agent-harness@.service")
+	unit, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("expected service template at %s: %v", unitPath, err)
+	}
+	for _, want := range []string{
+		"ExecStart=%h/.local/bin/agent-harness daemon --instance %i --home %h/.local/share/agent-harness/instances/%i",
+		"WorkingDirectory=%h/.local/share/agent-harness/instances/%i",
+	} {
+		if !strings.Contains(string(unit), want) {
+			t.Fatalf("expected unit to contain %q, got:\n%s", want, string(unit))
+		}
+	}
+	for _, want := range []string{
+		"installed systemd user service template",
+		unitPath,
+		"systemctl --user daemon-reload",
+		"systemctl --user enable --now agent-harness@default.service",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got %q", want, stdout)
+		}
+	}
+}
+
+func TestRunServiceInstallRejectsUnsupportedSubcommand(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "service", "remove")
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "service error: unsupported service command") {
+		t.Fatalf("expected helpful error, got %q", stderr)
+	}
+}
+
+func TestRunInitCreatesInstanceHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "initialized instance default") {
+		t.Fatalf("expected init confirmation, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, rel := range []string{"config", "state", "cache", "work", "logs", "config/config.yaml"} {
+		if _, err := os.Stat(filepath.Join(home, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected %s under instance home: %v", rel, err)
+		}
+	}
+}
+
+func TestRunDaemonTestWritesSampleHeartbeat(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "daemon", "--instance", "default", "--home", home, "--test")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "test heartbeat written for instance default") {
+		t.Fatalf("expected daemon confirmation, got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "state", "status.json"))
+	if err != nil {
+		t.Fatalf("expected status file: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("expected JSON status, got %s: %v", string(raw), err)
+	}
+	if decoded["instance"] != "default" || decoded["status"] != "running" || decoded["version"] != "dev" {
+		t.Fatalf("unexpected daemon status: %#v", decoded)
+	}
+	if decoded["pid"].(float64) <= 0 {
+		t.Fatalf("expected pid in daemon status: %#v", decoded)
+	}
+}
+
+func TestRunStatusJSONReadsInstanceStatusFile(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "state/status.json", `{"instance":"default","status":"running","started_at":"2026-01-01T12:00:00Z","last_heartbeat_at":"2026-01-01T12:01:00Z","pid":12345,"version":"dev"}`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "status", "--instance", "default", "--home", home, "--json")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("expected JSON status, got %q: %v", stdout, err)
+	}
+	if decoded["instance"] != "default" || decoded["status"] != "running" || decoded["version"] != "dev" {
+		t.Fatalf("unexpected status JSON: %#v", decoded)
+	}
+}
+
+func TestRunStatusHumanPrintsServiceHintsWithoutSystemctl(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "state/status.json", `{"instance":"default","status":"running","started_at":"2026-01-01T12:00:00Z","last_heartbeat_at":"2026-01-01T12:01:00Z","pid":12345,"version":"dev"}`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "status", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, want := range []string{
+		"instance: default",
+		"status: running",
+		"version: dev",
+		"systemctl --user status agent-harness@default.service --no-pager",
+		"journalctl --user -u agent-harness@default.service -n 100 --no-pager",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected status output to contain %q, got %q", want, stdout)
+		}
+	}
+}
+
+func TestRunStatusMissingFileReturnsUnknown(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "status", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0 for missing status, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "status: unknown") {
+		t.Fatalf("expected unknown status, got %q", stdout)
+	}
+}
+
 func runCLI(args ...string) (stdout string, stderr string, exitCode int) {
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
