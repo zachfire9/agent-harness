@@ -26,6 +26,9 @@ type Status struct {
 	LastHeartbeatAt time.Time `json:"last_heartbeat_at"`
 	PID             int       `json:"pid"`
 	Version         string    `json:"version"`
+	Commit          string    `json:"commit"`
+	BuildDate       string    `json:"build_date"`
+	Dirty           string    `json:"dirty"`
 	Error           string    `json:"error,omitempty"`
 }
 

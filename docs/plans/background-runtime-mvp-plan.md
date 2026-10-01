@@ -75,9 +75,9 @@ If the implementation uses different paths, document why and keep them instance-
 
 ## Step 01 — Background runtime and status checks
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-21-background-runtime-status`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/23
 - **Concept:** Before an agent can do useful scheduled work, it needs a reliable operational shell: install, start, stop, restart, status, logs, health, and update instructions.
 
 ### Objective
@@ -346,9 +346,9 @@ Step 01 is complete when:
 
 ## Step 02 — Versioned binary build and install workflow
 
-- **Status:** Pending
+- **Status:** In review
 - **Branch:** `step-22-versioned-binary-install`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/24
 - **Concept:** Once the runtime shell exists, package it as a versioned binary that can be installed on this host or another machine without requiring a source checkout or Go toolchain.
 
 ### Objective
@@ -417,6 +417,13 @@ This step should support both modes:
   agent-harness status --instance default
   ```
 
+- Document GitHub Releases as the published-version store:
+  - release archives and `checksums.txt` are uploaded as GitHub Release assets;
+  - generated `dist/` artifacts are not committed to git;
+  - each release is tied to a `v<version>` tag;
+  - the embedded binary version is `<version>` without the leading `v`;
+  - target machines download a specific release asset and verify `checksums.txt` before installing.
+- Document the first manual release-publishing flow with `gh release create`, while leaving GitHub Actions publishing for a later step.
 - Document development install from source separately:
 
   ```bash
@@ -477,7 +484,9 @@ Step 02 is complete when:
 - status output includes version metadata;
 - release-artifact install docs place the binary separately from per-instance homes;
 - update docs distinguish source-based development updates from release-artifact installs;
-- the plan leaves room for later GoReleaser/GitHub Releases automation without requiring it now.
+- published versions are documented as GitHub Releases with tagged assets and checksums;
+- target-machine docs show how to download a specific version, verify it, install it, and restart the service;
+- the plan leaves room for later GoReleaser/GitHub Actions release automation without requiring it now.
 
 ---
 

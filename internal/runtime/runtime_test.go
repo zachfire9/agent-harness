@@ -83,7 +83,10 @@ func TestStatusRoundTripAndJSONShape(t *testing.T) {
 		StartedAt:       started,
 		LastHeartbeatAt: started.Add(time.Minute),
 		PID:             12345,
-		Version:         "dev",
+		Version:         "0.1.0-dev",
+		Commit:          "abc1234",
+		BuildDate:       "2026-10-01T14:00:00Z",
+		Dirty:           "false",
 	}
 
 	if err := WriteStatus(paths.StatusPath, status); err != nil {
@@ -93,7 +96,7 @@ func TestStatusRoundTripAndJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read status failed: %v", err)
 	}
-	if got.Instance != "default" || got.Status != StateRunning || got.PID != 12345 || got.Version != "dev" {
+	if got.Instance != status.Instance || got.Status != status.Status || got.PID != status.PID || got.Version != status.Version || got.Commit != status.Commit || got.BuildDate != status.BuildDate || got.Dirty != status.Dirty {
 		t.Fatalf("unexpected status round trip: %#v", got)
 	}
 
@@ -105,7 +108,7 @@ func TestStatusRoundTripAndJSONShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("status file is not JSON: %v", err)
 	}
-	for _, key := range []string{"instance", "status", "started_at", "last_heartbeat_at", "pid", "version"} {
+	for _, key := range []string{"instance", "status", "started_at", "last_heartbeat_at", "pid", "version", "commit", "build_date", "dirty"} {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("expected status JSON key %q in %s", key, string(raw))
 		}

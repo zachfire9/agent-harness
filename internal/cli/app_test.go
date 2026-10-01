@@ -611,6 +611,27 @@ func TestRunServiceInstallRejectsUnsupportedSubcommand(t *testing.T) {
 	}
 }
 
+func TestRunVersionPrintsBuildMetadata(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "version")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, want := range []string{
+		"version: dev",
+		"commit: unknown",
+		"build_date: unknown",
+		"dirty: unknown",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got %q", want, stdout)
+		}
+	}
+}
+
 func TestRunInitCreatesInstanceHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "default")
 
@@ -691,7 +712,7 @@ func TestRunStatusHumanPrintsServiceHintsWithoutSystemctl(t *testing.T) {
 	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
 		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
 	}
-	writeCLITestFile(t, home, "state/status.json", `{"instance":"default","status":"running","started_at":"2026-01-01T12:00:00Z","last_heartbeat_at":"2026-01-01T12:01:00Z","pid":12345,"version":"dev"}`)
+	writeCLITestFile(t, home, "state/status.json", `{"instance":"default","status":"running","started_at":"2026-01-01T12:00:00Z","last_heartbeat_at":"2026-01-01T12:01:00Z","pid":12345,"version":"0.1.0-dev","commit":"abc1234","build_date":"2026-10-01T14:00:00Z","dirty":"false"}`)
 
 	stdout, stderr, exitCode := runCLI("agent-harness", "status", "--instance", "default", "--home", home)
 
@@ -704,7 +725,10 @@ func TestRunStatusHumanPrintsServiceHintsWithoutSystemctl(t *testing.T) {
 	for _, want := range []string{
 		"instance: default",
 		"status: running",
-		"version: dev",
+		"version: 0.1.0-dev",
+		"commit: abc1234",
+		"build_date: 2026-10-01T14:00:00Z",
+		"dirty: false",
 		"systemctl --user status agent-harness@default.service --no-pager",
 		"journalctl --user -u agent-harness@default.service -n 100 --no-pager",
 	} {

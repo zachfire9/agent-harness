@@ -21,6 +21,8 @@ Unit file:     ~/.config/systemd/user/agent-harness@.service
 
 The compiled binary should be installed separately from runtime data. Do not run the daemon from a source checkout or release extraction directory for normal background use.
 
+For machines that should not need a source checkout or Go toolchain, use the release-artifact install flow in [`docs/install-release.md`](install-release.md).
+
 ## Initialize an instance
 
 ```bash
