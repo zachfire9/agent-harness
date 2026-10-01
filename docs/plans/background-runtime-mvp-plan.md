@@ -520,23 +520,211 @@ journalctl --user -u agent-harness@default.service -n 100 --no-pager
 
 ---
 
-## Step 04 — First useful local job TBD
+## Step 04 — Configurable job registry and schedules
 
 - **Status:** Pending
-- **Branch:** `step-24-first-useful-local-job`
+- **Branch:** `step-24-configurable-job-registry`
 - **Pull Request:** TBD
-- **Concept:** Add the first user-visible behavior only after the background runtime and status checks are reliable.
+- **Concept:** Turn the first hardcoded heartbeat hook into a small reusable job system where enabled jobs, intervals, and job types are declared in config rather than baked into the daemon.
 
-### Candidate options
+### Objective
 
-Pick one later:
+Let an instance define one or more simple scheduled jobs in its instance config, while keeping the built-in heartbeat job as the default starter job created by `init`.
 
-- configurable email job;
-- daily brief email;
-- local file/log reminder;
-- another small scheduled task Zach wants first.
+### Scope
 
-Do not decide this in Step 01. Step 01 should stay focused on the runtime shell.
+- Keep the existing `state/jobs.json` runtime state shape from Step 03.
+- Replace single-purpose heartbeat scheduling with a tiny job registry, for example:
+
+  ```go
+  type Job interface {
+      Name() string
+      Run(ctx context.Context) error
+  }
+  ```
+
+- Add config for named jobs under `config/config.yaml`, conceptually:
+
+  ```yaml
+  jobs:
+    - name: heartbeat
+      type: heartbeat
+      enabled: true
+      interval_seconds: 60
+  ```
+
+- Validate job config on startup and surface bad job config as `config-error` in status output.
+- Support multiple enabled jobs with separate last-run/next-run/error state records.
+- Keep scheduling deterministic with an injected clock in tests.
+- Do not add email, model calls, Telegram, Google Docs, or rich cron syntax in this step.
+
+### Tests
+
+Add deterministic tests for:
+
+- default `init` config includes one enabled heartbeat job;
+- valid job config loads and schedules correctly;
+- unknown job types fail clearly;
+- disabled jobs do not run;
+- multiple jobs maintain independent state in `state/jobs.json`;
+- invalid intervals return config errors instead of crashing the daemon.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness init --instance default --home /tmp/agent-harness-demo
+agent-harness daemon --instance default --home /tmp/agent-harness-demo --test
+agent-harness status --instance default --home /tmp/agent-harness-demo --json
+```
+
+---
+
+## Step 05 — Job inspection and manual run commands
+
+- **Status:** Pending
+- **Branch:** `step-25-job-inspection-commands`
+- **Pull Request:** TBD
+- **Concept:** Operators need to inspect and trigger jobs without waiting for the daemon interval, especially before the first useful external integration exists.
+
+### Objective
+
+Add small CLI commands for listing configured jobs, inspecting job state, and manually running a job once through the same registry path used by the daemon.
+
+### Scope
+
+- Add a command such as:
+
+  ```bash
+  agent-harness jobs list --instance default
+  agent-harness jobs list --instance default --json
+  agent-harness jobs run heartbeat --instance default
+  ```
+
+- `jobs list` should show name, type, enabled/disabled status, last run, last success, next run, and last error.
+- `jobs run <name>` should execute the configured job immediately and update `state/jobs.json` just like a scheduled daemon run.
+- Manual runs should work without `systemd` and without a long-running daemon, so job behavior is easy to debug.
+- Manual runs should reject unknown, disabled, or misconfigured jobs with controlled errors.
+- Keep output secret-safe and parseable in JSON mode.
+
+### Tests
+
+Add deterministic tests for:
+
+- job list output contains configured jobs and redacts config values where needed;
+- JSON job list output is parseable and stable;
+- manual run updates last-run/last-success state;
+- manual run records errors when a fake job fails;
+- unknown or disabled job names return clear non-zero CLI errors.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness jobs list --instance default
+agent-harness jobs run heartbeat --instance default
+agent-harness jobs list --instance default --json
+```
+
+---
+
+## Step 06 — First useful local job: append a timestamped check-in file
+
+- **Status:** Pending
+- **Branch:** `step-26-local-checkin-job`
+- **Pull Request:** TBD
+- **Concept:** The first user-visible scheduled behavior should stay local and low-risk: prove the scheduler can produce a useful artifact without email, model calls, or external accounts.
+
+### Objective
+
+Add a configurable local check-in job that appends a timestamped line or small JSONL event to an instance-owned file on each run.
+
+### Scope
+
+- Add a new job type such as `local_checkin`.
+- Configure it in `config/config.yaml`, conceptually:
+
+  ```yaml
+  jobs:
+    - name: daily-checkin
+      type: local_checkin
+      enabled: true
+      interval_seconds: 86400
+      message: "agent-harness is alive"
+      output_path: "work/checkins.jsonl"
+  ```
+
+- Restrict `output_path` to the instance home, with a safe default under `work/` or `logs/`.
+- Write one compact record per run, including job name, timestamp, message, and success/failure metadata.
+- Surface the latest output location in job status without dumping the whole file.
+- Keep this as a local artifact only; do not add email, Telegram, Gmail, Docs, or LLM summarization here.
+
+### Tests
+
+Add deterministic tests for:
+
+- local check-in job writes one record per run;
+- output path is constrained to the instance home;
+- missing message uses a safe default;
+- write failures are recorded in job state;
+- status output points to the latest output file without leaking unrelated file contents.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness jobs run daily-checkin --instance default
+agent-harness jobs list --instance default
+cat ~/.local/share/agent-harness/instances/default/work/checkins.jsonl
+```
+
+---
+
+## Step 07 — Delivery adapter spike for the first external notification
+
+- **Status:** Pending
+- **Branch:** `step-27-delivery-adapter-spike`
+- **Pull Request:** TBD
+- **Concept:** After local jobs are inspectable, add one narrow delivery abstraction before choosing richer content like daily briefs.
+
+### Objective
+
+Create a minimal delivery interface and one configured delivery implementation, so later scheduled jobs can send a message without hardcoding the transport into each job type.
+
+### Scope
+
+- Add a small delivery interface, conceptually:
+
+  ```go
+  type Notifier interface {
+      Send(ctx context.Context, message Message) error
+  }
+  ```
+
+- Start with one low-risk delivery mode chosen at implementation time, such as:
+  - local file outbox under the instance home; or
+  - SMTP/email if credentials and target address are explicitly configured.
+- If SMTP/email is selected, keep credentials in the instance config/env file and redact them from status, logs, traces, and test failures.
+- Add a `notify_test` job or manual command that sends a configured test message through the adapter.
+- Do not add daily brief content, Google Docs ingestion, or LLM generation in this step.
+
+### Tests
+
+Add deterministic tests for:
+
+- notifier config validation;
+- file outbox or fake SMTP delivery path;
+- delivery errors are recorded in job state;
+- secrets are redacted from logs/status/errors;
+- jobs can depend on the notifier interface without knowing the concrete delivery transport.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness jobs run notify-test --instance default
+agent-harness jobs list --instance default
+```
 
 ---
 
@@ -611,12 +799,15 @@ Use these decisions when implementing Step 01:
 4. **Runtime abstractions:** Step 01 should create small internal path/service abstractions for testability and future OS adapters, with Linux/systemd as the only concrete service-manager implementation.
 5. **Health check:** Step 01 should use heartbeat/status files only. Do not add a local HTTP health endpoint in the MVP.
 
-## Suggested first approved scope
+## Suggested next scope after Step 03
 
-If Zach approves this plan, start with only Step 01:
+After Step 03, continue with the job system in thin slices instead of jumping straight to email, Google Docs, Telegram, AWS, model calls, or daily-brief content:
 
 ```text
-Step 01 — Background runtime and status checks
+Step 04 — Configurable job registry and schedules
+Step 05 — Job inspection and manual run commands
+Step 06 — First useful local job: append a timestamped check-in file
+Step 07 — Delivery adapter spike for the first external notification
 ```
 
-That gives a reusable operational base before adding Gmail, Google Docs, Telegram, AWS, model calls, or any content-specific scheduled job.
+That keeps the next PRs focused on reusable scheduling plumbing and local verification before adding external integrations or richer content.
