@@ -17,6 +17,7 @@ type Paths struct {
 	WorkDir    string
 	LogDir     string
 	StatusPath string
+	JobsPath   string
 }
 
 // ValidateInstanceName rejects names that could escape an instance directory,
@@ -47,5 +48,6 @@ func PathsForHome(home string) Paths {
 		WorkDir:    filepath.Join(home, "work"),
 		LogDir:     filepath.Join(home, "logs"),
 		StatusPath: filepath.Join(state, "status.json"),
+		JobsPath:   filepath.Join(state, "jobs.json"),
 	}
 }

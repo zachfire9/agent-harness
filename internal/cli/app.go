@@ -204,9 +204,14 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	metadata := version.Info()
+	cfg, err := harnessruntime.ReadRuntimeConfig(paths)
+	if err != nil {
+		fmt.Fprintf(stderr, "daemon error: %v\n", err)
+		return 1
+	}
 	if opts.test {
 		now := time.Now().UTC()
-		if err := harnessruntime.WriteHeartbeat(paths, opts.instance, now, now, metadata); err != nil {
+		if err := harnessruntime.WriteHeartbeatWithJobInterval(paths, opts.instance, now, now, metadata, cfg.HeartbeatJobInterval); err != nil {
 			fmt.Fprintf(stderr, "daemon error: %v\n", err)
 			return 1
 		}
@@ -298,6 +303,14 @@ func (a App) runStatus(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		status = harnessruntime.Status{Instance: opts.instance, Status: harnessruntime.StateUnknown}
 	}
+	jobs, jobsErr := harnessruntime.ReadJobs(paths.JobsPath)
+	if jobsErr != nil && !errors.Is(jobsErr, os.ErrNotExist) {
+		fmt.Fprintf(stderr, "status error: %v\n", jobsErr)
+		return 1
+	}
+	if len(jobs.Jobs) > 0 {
+		status.Jobs = jobs.Jobs
+	}
 	if opts.json {
 		data, err := json.MarshalIndent(status, "", "  ")
 		if err != nil {
@@ -384,6 +397,12 @@ func writeHumanStatus(stdout io.Writer, status harnessruntime.Status, instance s
 	}
 	if status.PID != 0 {
 		fmt.Fprintf(stdout, "pid: %d\n", status.PID)
+	}
+	if len(status.Jobs) > 0 {
+		fmt.Fprintln(stdout, "jobs:")
+		for name, job := range status.Jobs {
+			fmt.Fprintf(stdout, "  %s: %s next_run_at=%s\n", name, job.Status, job.NextRunAt.Format(time.RFC3339))
+		}
 	}
 	fmt.Fprintf(stdout, "home: %s\n", paths.Home)
 	fmt.Fprintf(stdout, "status_file: %s\n", paths.StatusPath)

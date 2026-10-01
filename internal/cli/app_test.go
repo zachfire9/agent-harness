@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/cli"
@@ -704,6 +705,75 @@ func TestRunStatusJSONReadsInstanceStatusFile(t *testing.T) {
 	}
 	if decoded["instance"] != "default" || decoded["status"] != "running" || decoded["version"] != "dev" {
 		t.Fatalf("unexpected status JSON: %#v", decoded)
+	}
+}
+
+func TestRunDaemonTestWritesHeartbeatJobAndStatusJSONSurfacesIt(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "daemon", "--instance", "default", "--home", home, "--test"); exitCode != 0 {
+		t.Fatalf("daemon test failed with exit %d: %s", exitCode, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(home, "state", "jobs.json")); err != nil {
+		t.Fatalf("expected jobs state file: %v", err)
+	}
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "status", "--instance", "default", "--home", home, "--json")
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("expected JSON status, got %q: %v", stdout, err)
+	}
+	jobs, ok := decoded["jobs"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected jobs in status JSON: %#v", decoded)
+	}
+	heartbeat, ok := jobs["heartbeat"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected heartbeat job in status JSON: %#v", jobs)
+	}
+	for _, want := range []string{"heartbeat", "succeeded"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected status JSON to contain %q, got %q", want, stdout)
+		}
+	}
+	for _, key := range []string{"last_run_at", "last_success_at", "last_error", "next_run_at"} {
+		if _, ok := heartbeat[key]; !ok {
+			t.Fatalf("expected heartbeat key %q in %#v", key, heartbeat)
+		}
+	}
+}
+
+func TestRunDaemonTestUsesConfiguredHeartbeatJobInterval(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", "heartbeat_job_interval_seconds: 300\n")
+	if _, stderr, exitCode := runCLI("agent-harness", "daemon", "--instance", "default", "--home", home, "--test"); exitCode != 0 {
+		t.Fatalf("daemon test failed with exit %d: %s", exitCode, stderr)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(home, "state", "jobs.json"))
+	if err != nil {
+		t.Fatalf("expected jobs file: %v", err)
+	}
+	var decoded struct {
+		Jobs map[string]struct {
+			LastRunAt time.Time `json:"last_run_at"`
+			NextRunAt time.Time `json:"next_run_at"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("expected jobs JSON, got %s: %v", string(raw), err)
+	}
+	heartbeat := decoded.Jobs["heartbeat"]
+	if got := heartbeat.NextRunAt.Sub(heartbeat.LastRunAt); got != 5*time.Minute {
+		t.Fatalf("expected configured 5 minute interval, got %s in %s", got, string(raw))
 	}
 }
 

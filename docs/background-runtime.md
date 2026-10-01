@@ -12,6 +12,7 @@ Instance root: ~/.local/share/agent-harness/instances/
 Instance home: ~/.local/share/agent-harness/instances/<instance>/
 Config:        ~/.local/share/agent-harness/instances/<instance>/config/
 State:         ~/.local/share/agent-harness/instances/<instance>/state/
+Jobs state:    ~/.local/share/agent-harness/instances/<instance>/state/jobs.json
 Cache:         ~/.local/share/agent-harness/instances/<instance>/cache/
 Work dir:      ~/.local/share/agent-harness/instances/<instance>/work/
 App logs:      ~/.local/share/agent-harness/instances/<instance>/logs/
@@ -35,6 +36,36 @@ For tests or custom installs, pass an explicit instance home:
 agent-harness init --instance default --home ~/.local/share/agent-harness/instances/default
 ```
 
+## Configure the built-in heartbeat job
+
+`agent-harness init` creates a starter config file:
+
+```text
+~/.local/share/agent-harness/instances/default/config/config.yaml
+```
+
+Step 03 includes one built-in generic job, `heartbeat`, so the daemon can prove it wakes up on an interval before any real content jobs exist. Configure its interval with:
+
+```yaml
+heartbeat_job_interval_seconds: 60
+```
+
+The daemon records job metadata in:
+
+```text
+~/.local/share/agent-harness/instances/default/state/jobs.json
+```
+
+The heartbeat job records:
+
+- job name and type;
+- last run time;
+- last success time;
+- last error, if any;
+- next run time.
+
+Future job types should reuse this state shape instead of creating job-specific status files.
+
 ## Run a daemon smoke test
 
 ```bash
@@ -43,7 +74,7 @@ agent-harness status --instance default
 agent-harness status --instance default --json
 ```
 
-`--test` writes a single sample heartbeat/status file and exits. This verifies the daemon/status file path without starting a long-running service. Normal background use runs without `--test` under the service manager.
+`--test` writes a single sample heartbeat/status file and exits. This verifies the daemon/status file path and built-in heartbeat job state without starting a long-running service. Normal background use runs without `--test` under the service manager.
 
 ## systemd user service
 
