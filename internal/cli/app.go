@@ -211,7 +211,7 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	if opts.test {
 		now := time.Now().UTC()
-		if err := harnessruntime.WriteHeartbeatWithJobInterval(paths, opts.instance, now, now, metadata, cfg.HeartbeatJobInterval); err != nil {
+		if err := harnessruntime.WriteHeartbeatWithRuntimeConfig(paths, opts.instance, now, now, metadata, cfg); err != nil {
 			fmt.Fprintf(stderr, "daemon error: %v\n", err)
 			return 1
 		}

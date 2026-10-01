@@ -36,7 +36,7 @@ For tests or custom installs, pass an explicit instance home:
 agent-harness init --instance default --home ~/.local/share/agent-harness/instances/default
 ```
 
-## Configure the built-in heartbeat job
+## Configure scheduled jobs
 
 `agent-harness init` creates a starter config file:
 
@@ -44,19 +44,23 @@ agent-harness init --instance default --home ~/.local/share/agent-harness/instan
 ~/.local/share/agent-harness/instances/default/config/config.yaml
 ```
 
-Step 03 includes one built-in generic job, `heartbeat`, so the daemon can prove it wakes up on an interval before any real content jobs exist. Configure its interval with:
+Jobs are declared in that config. The default config creates one enabled `heartbeat` job:
 
 ```yaml
-heartbeat_job_interval_seconds: 60
+jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
 ```
 
-The daemon records job metadata in:
+The daemon loads this list on startup, validates each job, and records per-job runtime metadata in:
 
 ```text
 ~/.local/share/agent-harness/instances/default/state/jobs.json
 ```
 
-The heartbeat job records:
+Each job state records:
 
 - job name and type;
 - last run time;
@@ -64,7 +68,9 @@ The heartbeat job records:
 - last error, if any;
 - next run time.
 
-Future job types should reuse this state shape instead of creating job-specific status files.
+Multiple enabled jobs can be configured independently. Disabled jobs are skipped. Unknown job types or invalid intervals are treated as configuration errors and are surfaced through status output. For backward compatibility, older configs with `heartbeat_job_interval_seconds` still configure the default heartbeat job when no `jobs:` list is present.
+
+Future job types should reuse this config/state shape instead of creating job-specific status files.
 
 ## Run a daemon smoke test
 

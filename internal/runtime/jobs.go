@@ -58,22 +58,70 @@ func WriteJobs(path string, jobs JobsState) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func RunHeartbeatJob(paths Paths, now time.Time, interval time.Duration) (JobState, error) {
+type Job interface {
+	Run(now time.Time, cfg JobConfig) JobState
+}
+
+type heartbeatJob struct{}
+
+func (heartbeatJob) Run(now time.Time, cfg JobConfig) JobState {
+	interval := cfg.Interval
 	if interval <= 0 {
-		interval = time.Minute
+		interval = defaultHeartbeatJobInterval
 	}
-	job := JobState{
-		Name:          "heartbeat",
-		Type:          "heartbeat",
+	return JobState{
+		Name:          cfg.Name,
+		Type:          cfg.Type,
 		Status:        JobSucceeded,
 		LastRunAt:     now.UTC(),
 		LastSuccessAt: now.UTC(),
 		LastError:     "",
 		NextRunAt:     now.Add(interval).UTC(),
 	}
-	jobs := JobsState{Jobs: map[string]JobState{job.Name: job}}
-	if err := WriteJobs(paths.JobsPath, jobs); err != nil {
+}
+
+func defaultJobRegistry() map[string]Job {
+	return map[string]Job{"heartbeat": heartbeatJob{}}
+}
+
+func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
+	jobsState := JobsState{Jobs: map[string]JobState{}}
+	if existing, err := ReadJobs(paths.JobsPath); err == nil {
+		jobsState = existing
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	registry := defaultJobRegistry()
+	for _, jobCfg := range cfg.Jobs {
+		if !jobCfg.Enabled {
+			continue
+		}
+		previous, hasPrevious := jobsState.Jobs[jobCfg.Name]
+		if hasPrevious && previous.NextRunAt.After(now) {
+			continue
+		}
+		job := registry[jobCfg.Type]
+		jobsState.Jobs[jobCfg.Name] = job.Run(now, jobCfg)
+	}
+	return WriteJobs(paths.JobsPath, jobsState)
+}
+
+func RunHeartbeatJob(paths Paths, now time.Time, interval time.Duration) (JobState, error) {
+	cfg := RuntimeConfig{Jobs: []JobConfig{{
+		Name:     "heartbeat",
+		Type:     "heartbeat",
+		Enabled:  true,
+		Interval: interval,
+	}}}
+	if cfg.Jobs[0].Interval <= 0 {
+		cfg.Jobs[0].Interval = defaultHeartbeatJobInterval
+	}
+	if err := RunConfiguredJobs(paths, cfg, now); err != nil {
 		return JobState{}, err
 	}
-	return job, nil
+	jobs, err := ReadJobs(paths.JobsPath)
+	if err != nil {
+		return JobState{}, err
+	}
+	return jobs.Jobs["heartbeat"], nil
 }

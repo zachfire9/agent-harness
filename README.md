@@ -43,7 +43,7 @@ The project currently has:
 - provider-neutral vector store abstraction with a default `none` implementation for future RAG support without requiring a vector database yet
 - user-level background runtime commands for named instances, status files, and systemd user service installation
 - version metadata embedded at build time plus manual release artifacts for Linux amd64/arm64 installs
-- a minimal built-in heartbeat job that records generic scheduled-job state under each instance home
+- a configurable scheduled-job registry with a default heartbeat job that records generic job state under each instance home
 
 ## Project layout
 
