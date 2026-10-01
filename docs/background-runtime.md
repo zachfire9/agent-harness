@@ -33,15 +33,15 @@ For tests or custom installs, pass an explicit instance home:
 agent-harness init --instance default --home ~/.local/share/agent-harness/instances/default
 ```
 
-## Run one heartbeat smoke check
+## Run a daemon smoke test
 
 ```bash
-agent-harness daemon --instance default --once
+agent-harness daemon --instance default --test
 agent-harness status --instance default
 agent-harness status --instance default --json
 ```
 
-`--once` writes a single running heartbeat/status file and exits. Normal background use runs without `--once` under the service manager.
+`--test` writes a single sample heartbeat/status file and exits. This verifies the daemon/status file path without starting a long-running service. Normal background use runs without `--test` under the service manager.
 
 ## systemd user service
 

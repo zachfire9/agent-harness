@@ -190,13 +190,13 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "daemon error: %v\n", err)
 		return 1
 	}
-	if opts.once {
+	if opts.test {
 		now := time.Now().UTC()
 		if err := harnessruntime.WriteHeartbeat(paths, opts.instance, now, now, appVersion); err != nil {
 			fmt.Fprintf(stderr, "daemon error: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "heartbeat written for instance %s\n", opts.instance)
+		fmt.Fprintf(stdout, "test heartbeat written for instance %s\n", opts.instance)
 		return 0
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -244,7 +244,7 @@ type runtimeOptions struct {
 	instance string
 	home     string
 	json     bool
-	once     bool
+	test     bool
 }
 
 func parseRuntimeOptions(args []string) (runtimeOptions, error) {
@@ -265,8 +265,8 @@ func parseRuntimeOptions(args []string) (runtimeOptions, error) {
 			i++
 		case "--json":
 			opts.json = true
-		case "--once":
-			opts.once = true
+		case "--test":
+			opts.test = true
 		default:
 			return runtimeOptions{}, fmt.Errorf("unknown option: %s", args[i])
 		}

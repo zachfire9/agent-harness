@@ -582,15 +582,15 @@ func TestRunInitCreatesInstanceHome(t *testing.T) {
 	}
 }
 
-func TestRunDaemonOnceWritesRunningStatus(t *testing.T) {
+func TestRunDaemonTestWritesSampleHeartbeat(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "default")
 
-	stdout, stderr, exitCode := runCLI("agent-harness", "daemon", "--instance", "default", "--home", home, "--once")
+	stdout, stderr, exitCode := runCLI("agent-harness", "daemon", "--instance", "default", "--home", home, "--test")
 
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
 	}
-	if !strings.Contains(stdout, "heartbeat written for instance default") {
+	if !strings.Contains(stdout, "test heartbeat written for instance default") {
 		t.Fatalf("expected daemon confirmation, got %q", stdout)
 	}
 	if stderr != "" {
