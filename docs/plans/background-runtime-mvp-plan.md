@@ -346,7 +346,7 @@ Step 01 is complete when:
 
 ## Step 02 — Versioned binary build and install workflow
 
-- **Status:** In review
+- **Status:** Completed
 - **Branch:** `step-22-versioned-binary-install`
 - **Pull Request:** https://github.com/zachfire9/agent-harness/pull/24
 - **Concept:** Once the runtime shell exists, package it as a versioned binary that can be installed on this host or another machine without requiring a source checkout or Go toolchain.
