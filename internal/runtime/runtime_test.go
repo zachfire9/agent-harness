@@ -71,6 +71,79 @@ func TestInitInstanceCreatesSelfContainedHome(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeConfigParsesHeartbeatJobInterval(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	configPath := filepath.Join(paths.ConfigDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("heartbeat_job_interval_seconds: 300\n"), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if cfg.HeartbeatJobInterval != 5*time.Minute {
+		t.Fatalf("expected 5 minute heartbeat interval, got %s", cfg.HeartbeatJobInterval)
+	}
+}
+
+func TestHeartbeatJobStateRoundTripAndJSONShape(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	state, err := RunHeartbeatJob(paths, now, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("run heartbeat job failed: %v", err)
+	}
+	if state.Name != "heartbeat" || state.Type != "heartbeat" || state.Status != JobSucceeded {
+		t.Fatalf("unexpected heartbeat job state: %#v", state)
+	}
+	if !state.LastRunAt.Equal(now) || !state.LastSuccessAt.Equal(now) || !state.NextRunAt.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("unexpected heartbeat timing: %#v", state)
+	}
+	if state.LastError != "" {
+		t.Fatalf("expected no error, got %q", state.LastError)
+	}
+
+	jobs, err := ReadJobs(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read jobs failed: %v", err)
+	}
+	got := jobs.Jobs["heartbeat"]
+	if got.Name != state.Name || got.Type != state.Type || got.Status != state.Status || !got.NextRunAt.Equal(state.NextRunAt) {
+		t.Fatalf("unexpected persisted heartbeat job state: %#v", got)
+	}
+
+	raw, err := os.ReadFile(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read raw jobs failed: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("jobs file is not JSON: %v", err)
+	}
+	jobsMap, ok := decoded["jobs"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level jobs object in %s", string(raw))
+	}
+	heartbeat, ok := jobsMap["heartbeat"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected heartbeat job in %s", string(raw))
+	}
+	for _, key := range []string{"name", "type", "status", "last_run_at", "last_success_at", "last_error", "next_run_at"} {
+		if _, ok := heartbeat[key]; !ok {
+			t.Fatalf("expected heartbeat JSON key %q in %s", key, string(raw))
+		}
+	}
+}
+
 func TestStatusRoundTripAndJSONShape(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {

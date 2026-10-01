@@ -20,16 +20,17 @@ const (
 
 // Status is the app-owned health/status document stored in an instance home.
 type Status struct {
-	Instance        string    `json:"instance"`
-	Status          State     `json:"status"`
-	StartedAt       time.Time `json:"started_at"`
-	LastHeartbeatAt time.Time `json:"last_heartbeat_at"`
-	PID             int       `json:"pid"`
-	Version         string    `json:"version"`
-	Commit          string    `json:"commit"`
-	BuildDate       string    `json:"build_date"`
-	Dirty           string    `json:"dirty"`
-	Error           string    `json:"error,omitempty"`
+	Instance        string              `json:"instance"`
+	Status          State               `json:"status"`
+	StartedAt       time.Time           `json:"started_at"`
+	LastHeartbeatAt time.Time           `json:"last_heartbeat_at"`
+	PID             int                 `json:"pid"`
+	Version         string              `json:"version"`
+	Commit          string              `json:"commit"`
+	BuildDate       string              `json:"build_date"`
+	Dirty           string              `json:"dirty"`
+	Error           string              `json:"error,omitempty"`
+	Jobs            map[string]JobState `json:"jobs,omitempty"`
 }
 
 func WriteStatus(path string, status Status) error {

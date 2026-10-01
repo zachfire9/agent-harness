@@ -492,7 +492,7 @@ Step 02 is complete when:
 
 ## Step 03 — Minimal scheduled job hook
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-23-minimal-scheduled-job-hook`
 - **Pull Request:** TBD
 - **Concept:** Once the process can run in the background, add a tiny generic job loop without tying it to a specific content feature.

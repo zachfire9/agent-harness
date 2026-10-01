@@ -10,6 +10,13 @@ import (
 
 // WriteHeartbeat writes a running status snapshot for the current process.
 func WriteHeartbeat(paths Paths, instance string, startedAt time.Time, now time.Time, metadata version.Metadata) error {
+	return WriteHeartbeatWithJobInterval(paths, instance, startedAt, now, metadata, defaultHeartbeatJobInterval)
+}
+
+func WriteHeartbeatWithJobInterval(paths Paths, instance string, startedAt time.Time, now time.Time, metadata version.Metadata, jobInterval time.Duration) error {
+	if _, err := RunHeartbeatJob(paths, now, jobInterval); err != nil {
+		return err
+	}
 	return WriteStatus(paths.StatusPath, Status{
 		Instance:        instance,
 		Status:          StateRunning,
@@ -29,7 +36,11 @@ func RunDaemon(ctx context.Context, paths Paths, instance string, metadata versi
 		interval = time.Minute
 	}
 	startedAt := time.Now().UTC()
-	if err := WriteHeartbeat(paths, instance, startedAt, startedAt, metadata); err != nil {
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		return err
+	}
+	if err := WriteHeartbeatWithJobInterval(paths, instance, startedAt, startedAt, metadata, cfg.HeartbeatJobInterval); err != nil {
 		return err
 	}
 	ticker := time.NewTicker(interval)
@@ -42,7 +53,7 @@ func RunDaemon(ctx context.Context, paths Paths, instance string, metadata versi
 		}
 		select {
 		case now := <-ticker.C:
-			if err := WriteHeartbeat(paths, instance, startedAt, now, metadata); err != nil {
+			if err := WriteHeartbeatWithJobInterval(paths, instance, startedAt, now, metadata, cfg.HeartbeatJobInterval); err != nil {
 				return err
 			}
 		case <-ctx.Done():

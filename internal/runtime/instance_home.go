@@ -5,7 +5,10 @@ import (
 	"path/filepath"
 )
 
-const starterConfig = "# agent-harness instance configuration\n"
+const starterConfig = `# agent-harness instance configuration
+# Built-in heartbeat job interval. Later steps can add more job types here.
+heartbeat_job_interval_seconds: 60
+`
 
 // InitInstance creates the self-contained directory tree for an instance.
 func InitInstance(paths Paths) error {
