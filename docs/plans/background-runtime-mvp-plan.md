@@ -40,8 +40,10 @@ Generic design requirement:
 - Runtime paths should be derived from config, flags, or XDG-style defaults.
 - Every service should have an explicit instance name, for example `default`, `worker`, or `scheduler`.
 - Status checks should work the same way for the first host and future instances.
+- Core daemon, status-file, instance-home, and version logic should be OS-neutral; only service-manager integration and default path resolution should be OS-specific.
+- The first implementation target is Linux with `systemd --user`, but the design should not prevent later macOS `launchd` or Windows service/task adapters.
 
-Recommended default paths:
+Recommended Linux default paths:
 
 ```text
 Binary:        ~/.local/bin/agent-harness
@@ -57,6 +59,13 @@ Unit file:     ~/.config/systemd/user/agent-harness@.service
 ```
 
 The compiled binary should not run out of the source checkout or release extraction directory. Each background instance should have a self-contained instance home. The daemon should use that instance home as its working directory and should read/write config, state, cache, work files, app logs, and status files only inside that home unless the operator explicitly configures another path.
+
+Future platform defaults should use each OS's normal per-user application-data location while preserving the same logical instance-home structure:
+
+```text
+macOS instance home:   ~/Library/Application Support/agent-harness/instances/<instance>/
+Windows instance home: %LOCALAPPDATA%\agent-harness\instances\<instance>\
+```
 
 If the implementation uses different paths, document why and keep them instance-aware.
 
@@ -102,6 +111,32 @@ Add the smallest operational runtime that proves `agent-harness` can stay alive 
   ```bash
   agent-harness daemon --instance default --home ~/.local/share/agent-harness/instances/default
   agent-harness status --instance default --home ~/.local/share/agent-harness/instances/default
+  ```
+
+- Keep path resolution behind a small abstraction so platform-specific defaults can be added later without changing daemon/status behavior. Conceptually:
+
+  ```go
+  type PathResolver interface {
+      InstanceHome(instance string) string
+      ConfigDir(instance string) string
+      StateDir(instance string) string
+      CacheDir(instance string) string
+      WorkDir(instance string) string
+      LogDir(instance string) string
+  }
+  ```
+
+- Keep service-manager operations behind a small abstraction, with Linux/systemd as the only required Step 01 implementation. Conceptually:
+
+  ```go
+  type ServiceManager interface {
+      Install(instance string) error
+      Start(instance string) error
+      Stop(instance string) error
+      Restart(instance string) error
+      Status(instance string) ServiceStatus
+      Logs(instance string, lines int) ([]string, error)
+  }
   ```
 
 - Add service-management documentation or generated unit content for a user-level systemd template:
@@ -216,7 +251,9 @@ Exact paths may vary after inspecting the current code, but expect something lik
 - Create: `internal/runtime/daemon.go`
 - Create: `internal/runtime/status.go`
 - Create: `internal/runtime/paths.go`
+- Create: `internal/runtime/paths_linux.go`
 - Create: `internal/runtime/service.go`
+- Create: `internal/runtime/service_systemd.go`
 - Create: `internal/runtime/instance_home.go`
 - Create: `internal/runtime/*_test.go`
 - Create: `docs/background-runtime.md`
@@ -237,6 +274,8 @@ Add deterministic unit tests for:
 - status classification for running/stopped/stale/config-error inputs;
 - JSON status output shape;
 - service unit template rendering does not include machine-specific hardcoding;
+- Linux path defaults follow the documented instance-home layout;
+- service-manager behavior can be tested with fakes without invoking real `systemd`;
 - signal/shutdown behavior where practical without flaky sleeps.
 
 Do not require real `systemd` in unit tests. Test unit rendering and status classification with fakes.
@@ -345,11 +384,19 @@ This step should support both modes:
   scripts/build-release.sh
   ```
 
-- Build at least the primary Linux target first, with room for more targets later:
+- Build at least the primary Linux targets first, with room for more targets later:
 
   ```text
   linux-amd64
   linux-arm64
+  ```
+
+- Document future release targets but do not require them in this step:
+
+  ```text
+  darwin-arm64
+  darwin-amd64
+  windows-amd64
   ```
 
 - Produce release artifacts under `dist/`, for example:
@@ -484,6 +531,67 @@ Do not decide this in Step 01. Step 01 should stay focused on the runtime shell.
 
 ---
 
+## Future TODO — macOS and Windows runtime adapters
+
+- **Status:** Future
+- **Branch:** TBD
+- **Pull Request:** TBD
+- **Concept:** After the Linux/systemd runtime and versioned install flow are proven, add OS-specific service adapters while preserving the same user-facing commands and instance-home model.
+
+### Objective
+
+Support the same core commands on additional operating systems:
+
+```bash
+agent-harness init --instance default
+agent-harness daemon --instance default
+agent-harness status --instance default
+agent-harness version
+```
+
+### Future macOS scope
+
+- Add macOS path defaults:
+
+  ```text
+  ~/Library/Application Support/agent-harness/instances/<instance>/
+  ```
+
+- Add a `launchd` service-manager adapter.
+- Generate or document per-user LaunchAgent plists under:
+
+  ```text
+  ~/Library/LaunchAgents/
+  ```
+
+- Document commands equivalent to:
+
+  ```bash
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agent-harness.default.plist
+  launchctl print gui/$(id -u)/com.agent-harness.default
+  launchctl bootout gui/$(id -u)/com.agent-harness.default
+  ```
+
+### Future Windows scope
+
+- Add Windows path defaults:
+
+  ```text
+  %LOCALAPPDATA%\agent-harness\instances\<instance>\
+  ```
+
+- Add a Windows Service or Task Scheduler adapter.
+- Ensure `agent-harness.exe status --instance default --json` stays compatible with the same status-file schema.
+- Keep PowerShell install/update/status docs separate from Linux and macOS docs.
+
+### Guardrails
+
+- Do not fork daemon/job logic by OS.
+- Keep OS-specific code limited to path defaults, service-manager integration, install docs, and platform-specific tests.
+- Do not make macOS or Windows support a prerequisite for the Linux runtime MVP.
+
+---
+
 ## Open decisions
 
 Before implementing Step 01, confirm:
@@ -491,7 +599,8 @@ Before implementing Step 01, confirm:
 1. Should the first runtime manager be only `systemd --user`, or should docs also include cron/nohup as unsupported fallbacks?
 2. What should the default instance name be: `default`, `local`, or something else?
 3. Should `agent-harness status` shell out to `systemctl` when available, or only read its own status file and print the relevant `systemctl` command for the operator to run?
-4. Should the daemon command do nothing except heartbeat in Step 01, or should it expose a tiny local health endpoint too?
+4. Should Step 01 create explicit `PathResolver` and `ServiceManager` interfaces immediately, or keep them as small internal structs until the first non-Linux adapter is implemented?
+5. Should the daemon command do nothing except heartbeat in Step 01, or should it expose a tiny local health endpoint too?
 
 ## Suggested first approved scope
 
