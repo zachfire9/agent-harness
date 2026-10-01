@@ -582,7 +582,7 @@ agent-harness status --instance default --home /tmp/agent-harness-demo --json
 
 ## Step 05 — Job inspection and manual run commands
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-25-job-inspection-commands`
 - **Pull Request:** TBD
 - **Concept:** Operators need to inspect and trigger jobs without waiting for the daemon interval, especially before the first useful external integration exists.

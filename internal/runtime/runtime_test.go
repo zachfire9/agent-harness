@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -297,6 +298,42 @@ func TestRunConfiguredJobsHonorsNextRunAt(t *testing.T) {
 	if !jobs.Jobs["heartbeat"].LastRunAt.Equal(afterNextRun) {
 		t.Fatalf("job should rerun after next_run_at, got %#v", jobs.Jobs["heartbeat"])
 	}
+}
+
+func TestRunConfiguredJobNowRecordsFailureState(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{Name: "broken", Type: "fake", Enabled: true, Interval: 5 * time.Minute}}}
+
+	state, err := runConfiguredJobNowWithRegistry(paths, cfg, "broken", now, map[string]Job{"fake": failingJob{err: "fake failure"}})
+
+	if err == nil || !strings.Contains(err.Error(), "fake failure") {
+		t.Fatalf("expected fake failure error, got %v", err)
+	}
+	if state.Name != "broken" || state.Type != "fake" || state.Status != JobFailed || state.LastError != "fake failure" {
+		t.Fatalf("expected failed job state, got %#v", state)
+	}
+	if !state.LastRunAt.Equal(now) || !state.NextRunAt.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("expected failure timing to be recorded, got %#v", state)
+	}
+	jobs, readErr := ReadJobs(paths.JobsPath)
+	if readErr != nil {
+		t.Fatalf("read jobs failed: %v", readErr)
+	}
+	if got := jobs.Jobs["broken"]; got.Status != JobFailed || got.LastError != "fake failure" {
+		t.Fatalf("expected persisted failed state, got %#v", got)
+	}
+}
+
+type failingJob struct {
+	err string
+}
+
+func (f failingJob) Run(now time.Time, cfg JobConfig) (JobState, error) {
+	return JobState{}, errors.New(f.err)
 }
 
 func TestRunDaemonRecordsConfigErrorForInvalidJobConfig(t *testing.T) {

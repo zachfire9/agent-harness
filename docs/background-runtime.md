@@ -70,6 +70,25 @@ Each job state records:
 
 Multiple enabled jobs can be configured independently. Disabled jobs are skipped. Unknown job types or invalid intervals are treated as configuration errors and are surfaced through status output. For backward compatibility, older configs with `heartbeat_job_interval_seconds` still configure the default heartbeat job when no `jobs:` list is present.
 
+## Inspect and manually run jobs
+
+List configured jobs without needing a long-running daemon:
+
+```bash
+agent-harness jobs list --instance default
+agent-harness jobs list --instance default --json
+```
+
+`jobs list` combines the current `config/config.yaml` job declarations with any existing `state/jobs.json` runtime state. It shows enabled/disabled status plus last run, last success, next run, and last error when those fields exist.
+
+Run a configured job immediately through the same registry used by the daemon:
+
+```bash
+agent-harness jobs run heartbeat --instance default
+```
+
+Manual runs update `state/jobs.json` just like scheduled daemon runs. Unknown jobs, disabled jobs, and invalid job config return controlled non-zero errors. The command does not require `systemd` or a background daemon, which makes it useful for debugging instance config before enabling the service.
+
 Future job types should reuse this config/state shape instead of creating job-specific status files.
 
 ## Run a daemon smoke test
