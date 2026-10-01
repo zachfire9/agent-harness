@@ -977,6 +977,51 @@ func TestRunJobsRunLocalCheckinWritesFileAndShowsOutputPath(t *testing.T) {
 	}
 }
 
+func TestRunJobsRunNotifyTestWritesFileOutbox(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `jobs:
+  - name: notify-test
+    type: notify_test
+    enabled: true
+    interval_seconds: 60
+    message: "delivery adapter works"
+    outbox_path: "work/outbox.jsonl"
+`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "jobs", "run", "notify-test", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "ran job notify-test: succeeded") {
+		t.Fatalf("expected run confirmation, got %q", stdout)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "work", "outbox.jsonl"))
+	if err != nil {
+		t.Fatalf("expected outbox file: %v", err)
+	}
+	if !strings.Contains(string(raw), `"job":"notify-test"`) || !strings.Contains(string(raw), `"transport":"file_outbox"`) || !strings.Contains(string(raw), `"message":"delivery adapter works"`) {
+		t.Fatalf("expected outbox record, got %s", string(raw))
+	}
+
+	stdout, stderr, exitCode = runCLI("agent-harness", "jobs", "list", "--instance", "default", "--home", home)
+	if exitCode != 0 {
+		t.Fatalf("expected list exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "output_path: work/outbox.jsonl") {
+		t.Fatalf("expected outbox path in jobs list, got %q", stdout)
+	}
+	if strings.Contains(stdout, "delivery adapter works") {
+		t.Fatalf("jobs list should not dump outbox contents, got %q", stdout)
+	}
+}
+
 func TestRunJobsRunRejectsUnknownAndDisabledJobs(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "default")
 	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {

@@ -682,7 +682,7 @@ cat ~/.local/share/agent-harness/instances/default/work/checkins.jsonl
 
 ## Step 07 — Delivery adapter spike for the first external notification
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-27-delivery-adapter-spike`
 - **Pull Request:** TBD
 - **Concept:** After local jobs are inspectable, add one narrow delivery abstraction before choosing richer content like daily briefs.
@@ -701,11 +701,9 @@ Create a minimal delivery interface and one configured delivery implementation, 
   }
   ```
 
-- Start with one low-risk delivery mode chosen at implementation time, such as:
-  - local file outbox under the instance home; or
-  - SMTP/email if credentials and target address are explicitly configured.
-- If SMTP/email is selected, keep credentials in the instance config/env file and redact them from status, logs, traces, and test failures.
-- Add a `notify_test` job or manual command that sends a configured test message through the adapter.
+- Start with one low-risk delivery mode: a local file outbox under the instance home.
+- Add a `notify_test` job that sends a configured test message through the adapter.
+- Do not add SMTP/email credentials in this step; no secrets are required for file-outbox delivery.
 - Do not add daily brief content, Google Docs ingestion, or LLM generation in this step.
 
 ### Tests
@@ -713,9 +711,9 @@ Create a minimal delivery interface and one configured delivery implementation, 
 Add deterministic tests for:
 
 - notifier config validation;
-- file outbox or fake SMTP delivery path;
+- file outbox delivery path;
 - delivery errors are recorded in job state;
-- secrets are redacted from logs/status/errors;
+- message contents are not dumped into `jobs list` output;
 - jobs can depend on the notifier interface without knowing the concrete delivery transport.
 
 ### Verification

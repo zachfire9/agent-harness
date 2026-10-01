@@ -19,6 +19,7 @@ type JobConfig struct {
 	Interval   time.Duration
 	Message    string
 	OutputPath string
+	OutboxPath string
 }
 
 type RuntimeConfig struct {
@@ -127,6 +128,8 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error)
 			current.Message = value
 		case "output_path":
 			current.OutputPath = value
+		case "outbox_path":
+			current.OutboxPath = value
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -156,7 +159,7 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 			return fmt.Errorf("duplicate job name %q", job.Name)
 		}
 		seen[job.Name] = true
-		if job.Type != "heartbeat" && job.Type != "local_checkin" {
+		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" {
 			return fmt.Errorf("unknown job type %q for job %q", job.Type, job.Name)
 		}
 		if job.Interval <= 0 {
@@ -165,6 +168,11 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 		if job.Type == "local_checkin" {
 			if err := validateInstanceRelativePath(job.OutputPath); err != nil {
 				return fmt.Errorf("invalid output_path for job %q: %w", job.Name, err)
+			}
+		}
+		if job.Type == "notify_test" {
+			if err := validateInstanceRelativePath(job.OutboxPath); err != nil {
+				return fmt.Errorf("invalid outbox_path for job %q: %w", job.Name, err)
 			}
 		}
 	}

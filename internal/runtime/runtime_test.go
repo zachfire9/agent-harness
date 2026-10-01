@@ -240,6 +240,59 @@ func TestReadRuntimeConfigRejectsLocalCheckinOutputOutsideInstanceHome(t *testin
 	}
 }
 
+func TestReadRuntimeConfigParsesNotifyTestJobFields(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `jobs:
+  - name: notify-test
+    type: notify_test
+    enabled: true
+    interval_seconds: 60
+    message: "delivery adapter works"
+    outbox_path: "work/outbox.jsonl"
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	job := cfg.Jobs[0]
+	if job.Name != "notify-test" || job.Type != "notify_test" || job.Message != "delivery adapter works" || job.OutboxPath != "work/outbox.jsonl" || job.Interval != time.Minute {
+		t.Fatalf("unexpected notify_test config: %#v", job)
+	}
+}
+
+func TestReadRuntimeConfigRejectsNotifyTestOutboxOutsideInstanceHome(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `jobs:
+  - name: notify-test
+    type: notify_test
+    enabled: true
+    interval_seconds: 60
+    outbox_path: "../outside.jsonl"
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), "outbox_path") {
+		t.Fatalf("expected outbox_path validation error, got %v", err)
+	}
+}
+
 func TestHeartbeatJobStateRoundTripAndJSONShape(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -418,6 +471,89 @@ func TestRunLocalCheckinJobRecordsWriteFailure(t *testing.T) {
 	}
 }
 
+func TestRunNotifyTestJobWritesOutboxThroughNotifier(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{
+		Name:       "notify-test",
+		Type:       "notify_test",
+		Enabled:    true,
+		Interval:   time.Minute,
+		Message:    "delivery adapter works",
+		OutboxPath: "work/outbox.jsonl",
+	}}}
+
+	state, err := RunConfiguredJobNow(paths, cfg, "notify-test", now)
+	if err != nil {
+		t.Fatalf("run notify test failed: %v", err)
+	}
+	if state.Status != JobSucceeded || state.OutputPath != "work/outbox.jsonl" {
+		t.Fatalf("expected successful notify_test state with outbox path, got %#v", state)
+	}
+	raw, err := os.ReadFile(filepath.Join(paths.Home, "work", "outbox.jsonl"))
+	if err != nil {
+		t.Fatalf("expected outbox file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected one outbox record, got %d in %q", len(lines), string(raw))
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
+		t.Fatalf("expected JSON outbox record, got %q: %v", lines[0], err)
+	}
+	if record["job"] != "notify-test" || record["message"] != "delivery adapter works" || record["timestamp"] != "2026-01-01T12:00:00Z" || record["transport"] != "file_outbox" {
+		t.Fatalf("unexpected outbox record: %#v", record)
+	}
+}
+
+func TestNotifyTestJobUsesNotifierInterface(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	notifier := &recordingNotifier{}
+	cfg := JobConfig{Name: "notify-test", Type: "notify_test", Enabled: true, Interval: time.Minute, Message: "hello"}
+
+	state, err := runNotifyTestWithNotifier(Paths{}, now, cfg, notifier)
+	if err != nil {
+		t.Fatalf("run notify test with notifier failed: %v", err)
+	}
+	if state.Status != JobSucceeded || len(notifier.messages) != 1 || notifier.messages[0].Body != "hello" {
+		t.Fatalf("expected notify_test to send through notifier, state=%#v messages=%#v", state, notifier.messages)
+	}
+}
+
+func TestRunNotifyTestJobRecordsDeliveryFailure(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.Home, "work"), 0o755); err != nil {
+		t.Fatalf("mkdir work: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.Home, "work", "blocked"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write blocked file: %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{Name: "notify-test", Type: "notify_test", Enabled: true, Interval: time.Minute, OutboxPath: "work/blocked/outbox.jsonl"}}}
+
+	state, err := RunConfiguredJobNow(paths, cfg, "notify-test", now)
+	if err == nil {
+		t.Fatal("expected delivery failure")
+	}
+	if state.Status != JobFailed || state.LastError == "" || state.OutputPath != "work/blocked/outbox.jsonl" {
+		t.Fatalf("expected failed notify_test state, got %#v", state)
+	}
+	jobs, readErr := ReadJobs(paths.JobsPath)
+	if readErr != nil {
+		t.Fatalf("read jobs failed: %v", readErr)
+	}
+	if got := jobs.Jobs["notify-test"]; got.Status != JobFailed || got.LastError == "" || got.OutputPath != "work/blocked/outbox.jsonl" {
+		t.Fatalf("expected persisted failed notify_test state, got %#v", got)
+	}
+}
+
 func TestRunConfiguredJobsHonorsNextRunAt(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -479,6 +615,18 @@ func TestRunConfiguredJobNowRecordsFailureState(t *testing.T) {
 	if got := jobs.Jobs["broken"]; got.Status != JobFailed || got.LastError != "fake failure" {
 		t.Fatalf("expected persisted failed state, got %#v", got)
 	}
+}
+
+type recordingNotifier struct {
+	messages []Message
+}
+
+func (r *recordingNotifier) Send(ctx context.Context, message Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.messages = append(r.messages, message)
+	return nil
 }
 
 type failingJob struct {
