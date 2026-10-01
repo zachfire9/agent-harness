@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -59,12 +60,12 @@ func WriteJobs(path string, jobs JobsState) error {
 }
 
 type Job interface {
-	Run(now time.Time, cfg JobConfig) JobState
+	Run(now time.Time, cfg JobConfig) (JobState, error)
 }
 
 type heartbeatJob struct{}
 
-func (heartbeatJob) Run(now time.Time, cfg JobConfig) JobState {
+func (heartbeatJob) Run(now time.Time, cfg JobConfig) (JobState, error) {
 	interval := cfg.Interval
 	if interval <= 0 {
 		interval = defaultHeartbeatJobInterval
@@ -77,7 +78,7 @@ func (heartbeatJob) Run(now time.Time, cfg JobConfig) JobState {
 		LastSuccessAt: now.UTC(),
 		LastError:     "",
 		NextRunAt:     now.Add(interval).UTC(),
-	}
+	}, nil
 }
 
 func defaultJobRegistry() map[string]Job {
@@ -85,10 +86,8 @@ func defaultJobRegistry() map[string]Job {
 }
 
 func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
-	jobsState := JobsState{Jobs: map[string]JobState{}}
-	if existing, err := ReadJobs(paths.JobsPath); err == nil {
-		jobsState = existing
-	} else if !os.IsNotExist(err) {
+	jobsState, err := readJobsStateOrEmpty(paths.JobsPath)
+	if err != nil {
 		return err
 	}
 	registry := defaultJobRegistry()
@@ -100,10 +99,113 @@ func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
 		if hasPrevious && previous.NextRunAt.After(now) {
 			continue
 		}
-		job := registry[jobCfg.Type]
-		jobsState.Jobs[jobCfg.Name] = job.Run(now, jobCfg)
+		if _, err := runConfiguredJobWithState(jobsState, jobCfg, now, registry); err != nil {
+			if writeErr := WriteJobs(paths.JobsPath, jobsState); writeErr != nil {
+				return writeErr
+			}
+			return err
+		}
 	}
 	return WriteJobs(paths.JobsPath, jobsState)
+}
+
+func RunConfiguredJobNow(paths Paths, cfg RuntimeConfig, name string, now time.Time) (JobState, error) {
+	return runConfiguredJobNowWithRegistry(paths, cfg, name, now, defaultJobRegistry())
+}
+
+func runConfiguredJobNowWithRegistry(paths Paths, cfg RuntimeConfig, name string, now time.Time, registry map[string]Job) (JobState, error) {
+	jobCfg, ok := findJobConfig(cfg, name)
+	if !ok {
+		return JobState{}, fmt.Errorf("unknown job %q", name)
+	}
+	if !jobCfg.Enabled {
+		return JobState{}, fmt.Errorf("job %q is disabled", name)
+	}
+	jobsState, err := readJobsStateOrEmpty(paths.JobsPath)
+	if err != nil {
+		return JobState{}, err
+	}
+	state, runErr := runConfiguredJobWithState(jobsState, jobCfg, now, registry)
+	if err := WriteJobs(paths.JobsPath, jobsState); err != nil {
+		return JobState{}, err
+	}
+	return state, runErr
+}
+
+func findJobConfig(cfg RuntimeConfig, name string) (JobConfig, bool) {
+	for _, jobCfg := range cfg.Jobs {
+		if jobCfg.Name == name {
+			return jobCfg, true
+		}
+	}
+	return JobConfig{}, false
+}
+
+func runConfiguredJobWithState(jobsState JobsState, jobCfg JobConfig, now time.Time, registry map[string]Job) (JobState, error) {
+	job, ok := registry[jobCfg.Type]
+	if !ok {
+		state := failedJobState(jobCfg, now, fmt.Errorf("unknown job type %q", jobCfg.Type))
+		jobsState.Jobs[jobCfg.Name] = state
+		return state, fmt.Errorf("unknown job type %q", jobCfg.Type)
+	}
+	state, err := job.Run(now, jobCfg)
+	if err != nil {
+		state = failedJobState(jobCfg, now, err)
+	} else {
+		state = normalizeJobState(state, jobCfg, now)
+	}
+	jobsState.Jobs[jobCfg.Name] = state
+	return state, err
+}
+
+func normalizeJobState(state JobState, jobCfg JobConfig, now time.Time) JobState {
+	if state.Name == "" {
+		state.Name = jobCfg.Name
+	}
+	if state.Type == "" {
+		state.Type = jobCfg.Type
+	}
+	if state.Status == "" {
+		state.Status = JobSucceeded
+	}
+	if state.LastRunAt.IsZero() {
+		state.LastRunAt = now.UTC()
+	}
+	if state.Status == JobSucceeded && state.LastSuccessAt.IsZero() {
+		state.LastSuccessAt = state.LastRunAt
+	}
+	if state.NextRunAt.IsZero() {
+		state.NextRunAt = state.LastRunAt.Add(jobCfg.Interval).UTC()
+	}
+	return state
+}
+
+func failedJobState(jobCfg JobConfig, now time.Time, err error) JobState {
+	interval := jobCfg.Interval
+	if interval <= 0 {
+		interval = defaultHeartbeatJobInterval
+	}
+	return JobState{
+		Name:      jobCfg.Name,
+		Type:      jobCfg.Type,
+		Status:    JobFailed,
+		LastRunAt: now.UTC(),
+		LastError: err.Error(),
+		NextRunAt: now.Add(interval).UTC(),
+	}
+}
+
+func readJobsStateOrEmpty(path string) (JobsState, error) {
+	jobsState := JobsState{Jobs: map[string]JobState{}}
+	if existing, err := ReadJobs(path); err == nil {
+		jobsState = existing
+	} else if !os.IsNotExist(err) {
+		return JobsState{}, err
+	}
+	if jobsState.Jobs == nil {
+		jobsState.Jobs = map[string]JobState{}
+	}
+	return jobsState, nil
 }
 
 func RunHeartbeatJob(paths Paths, now time.Time, interval time.Duration) (JobState, error) {

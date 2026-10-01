@@ -824,6 +824,153 @@ func TestRunStatusMissingFileReturnsUnknown(t *testing.T) {
 	}
 }
 
+func TestRunJobsListHumanShowsConfiguredJobsAndState(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
+  - name: disabled-heartbeat
+    type: heartbeat
+    enabled: false
+    interval_seconds: 300
+`)
+	writeCLITestFile(t, home, "state/jobs.json", `{"jobs":{"heartbeat":{"name":"heartbeat","type":"heartbeat","status":"succeeded","last_run_at":"2026-01-01T12:00:00Z","last_success_at":"2026-01-01T12:00:00Z","last_error":"","next_run_at":"2026-01-01T12:01:00Z"}}}`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "jobs", "list", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, want := range []string{
+		"name: heartbeat",
+		"type: heartbeat",
+		"enabled: true",
+		"status: succeeded",
+		"last_run_at: 2026-01-01T12:00:00Z",
+		"next_run_at: 2026-01-01T12:01:00Z",
+		"name: disabled-heartbeat",
+		"enabled: false",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected jobs list output to contain %q, got %q", want, stdout)
+		}
+	}
+}
+
+func TestRunJobsListJSONIsParseableAndStable(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "jobs", "list", "--instance", "default", "--home", home, "--json")
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	var decoded struct {
+		Jobs []struct {
+			Name    string `json:"name"`
+			Type    string `json:"type"`
+			Enabled bool   `json:"enabled"`
+			Status  string `json:"status"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("expected parseable jobs JSON, got %q: %v", stdout, err)
+	}
+	if len(decoded.Jobs) != 1 || decoded.Jobs[0].Name != "heartbeat" || decoded.Jobs[0].Type != "heartbeat" || !decoded.Jobs[0].Enabled {
+		t.Fatalf("unexpected jobs JSON: %#v", decoded)
+	}
+}
+
+func TestRunJobsRunHeartbeatUpdatesJobState(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "jobs", "run", "heartbeat", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "ran job heartbeat: succeeded") {
+		t.Fatalf("expected run confirmation, got %q", stdout)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "state", "jobs.json"))
+	if err != nil {
+		t.Fatalf("expected jobs file: %v", err)
+	}
+	var decoded struct {
+		Jobs map[string]struct {
+			Status        string    `json:"status"`
+			LastRunAt     time.Time `json:"last_run_at"`
+			LastSuccessAt time.Time `json:"last_success_at"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("expected jobs JSON, got %s: %v", string(raw), err)
+	}
+	heartbeat := decoded.Jobs["heartbeat"]
+	if heartbeat.Status != "succeeded" || heartbeat.LastRunAt.IsZero() || heartbeat.LastSuccessAt.IsZero() {
+		t.Fatalf("expected successful heartbeat state, got %#v in %s", heartbeat, string(raw))
+	}
+}
+
+func TestRunJobsRunRejectsUnknownAndDisabledJobs(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
+  - name: off
+    type: heartbeat
+    enabled: false
+    interval_seconds: 60
+`)
+
+	for _, tt := range []struct {
+		name       string
+		jobName    string
+		wantErrSub string
+	}{
+		{name: "unknown", jobName: "missing", wantErrSub: `jobs error: unknown job "missing"`},
+		{name: "disabled", jobName: "off", wantErrSub: `jobs error: job "off" is disabled`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, exitCode := runCLI("agent-harness", "jobs", "run", tt.jobName, "--instance", "default", "--home", home)
+			if exitCode == 0 {
+				t.Fatal("expected non-zero exit code")
+			}
+			if stdout != "" {
+				t.Fatalf("expected empty stdout, got %q", stdout)
+			}
+			if !strings.Contains(stderr, tt.wantErrSub) {
+				t.Fatalf("expected stderr to contain %q, got %q", tt.wantErrSub, stderr)
+			}
+		})
+	}
+}
+
 func runCLI(args ...string) (stdout string, stderr string, exitCode int) {
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer

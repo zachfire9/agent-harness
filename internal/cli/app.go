@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -146,6 +147,8 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return a.runDaemon(args[2:], stdout, stderr)
 	case "init":
 		return a.runInit(args[2:], stdout, stderr)
+	case "jobs":
+		return a.runJobs(args[2:], stdout, stderr)
 	case "service":
 		return a.runService(args[2:], stdout, stderr)
 	case "status":
@@ -282,6 +285,160 @@ func defaultConfigHome() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".config"), nil
+}
+
+func (a App) runJobs(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "jobs error: unsupported jobs command")
+		return 1
+	}
+	switch args[0] {
+	case "list":
+		return a.runJobsList(args[1:], stdout, stderr)
+	case "run":
+		return a.runJobsRun(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "jobs error: unsupported jobs command")
+		return 1
+	}
+}
+
+func (a App) runJobsList(args []string, stdout io.Writer, stderr io.Writer) int {
+	opts, err := parseRuntimeOptions(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return 1
+	}
+	paths, cfg, jobs, ok := loadJobsCommandState(opts, stderr)
+	if !ok {
+		return 1
+	}
+	items := buildJobListItems(cfg, jobs)
+	if opts.json {
+		data, err := json.MarshalIndent(struct {
+			Jobs []jobListItem `json:"jobs"`
+		}{Jobs: items}, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "jobs error: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(data))
+		return 0
+	}
+	writeHumanJobsList(stdout, items, paths)
+	return 0
+}
+
+func (a App) runJobsRun(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		fmt.Fprintln(stderr, "jobs error: jobs run requires a job name")
+		return 1
+	}
+	jobName := args[0]
+	opts, err := parseRuntimeOptions(args[1:])
+	if err != nil {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return 1
+	}
+	paths, err := resolveRuntimePaths(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return 1
+	}
+	cfg, err := harnessruntime.ReadRuntimeConfig(paths)
+	if err != nil {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return 1
+	}
+	state, err := harnessruntime.RunConfiguredJobNow(paths, cfg, jobName, time.Now().UTC())
+	if err != nil {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "ran job %s: %s\n", state.Name, state.Status)
+	return 0
+}
+
+type jobListItem struct {
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Enabled       bool   `json:"enabled"`
+	Status        string `json:"status,omitempty"`
+	LastRunAt     string `json:"last_run_at,omitempty"`
+	LastSuccessAt string `json:"last_success_at,omitempty"`
+	NextRunAt     string `json:"next_run_at,omitempty"`
+	LastError     string `json:"last_error,omitempty"`
+}
+
+func loadJobsCommandState(opts runtimeOptions, stderr io.Writer) (harnessruntime.Paths, harnessruntime.RuntimeConfig, harnessruntime.JobsState, bool) {
+	paths, err := resolveRuntimePaths(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return harnessruntime.Paths{}, harnessruntime.RuntimeConfig{}, harnessruntime.JobsState{}, false
+	}
+	cfg, err := harnessruntime.ReadRuntimeConfig(paths)
+	if err != nil {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return harnessruntime.Paths{}, harnessruntime.RuntimeConfig{}, harnessruntime.JobsState{}, false
+	}
+	jobs, err := harnessruntime.ReadJobs(paths.JobsPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(stderr, "jobs error: %v\n", err)
+		return harnessruntime.Paths{}, harnessruntime.RuntimeConfig{}, harnessruntime.JobsState{}, false
+	}
+	if jobs.Jobs == nil {
+		jobs.Jobs = map[string]harnessruntime.JobState{}
+	}
+	return paths, cfg, jobs, true
+}
+
+func buildJobListItems(cfg harnessruntime.RuntimeConfig, jobs harnessruntime.JobsState) []jobListItem {
+	items := make([]jobListItem, 0, len(cfg.Jobs))
+	for _, jobCfg := range cfg.Jobs {
+		item := jobListItem{Name: jobCfg.Name, Type: jobCfg.Type, Enabled: jobCfg.Enabled}
+		if state, ok := jobs.Jobs[jobCfg.Name]; ok {
+			item.Status = string(state.Status)
+			item.LastRunAt = formatJobTime(state.LastRunAt)
+			item.LastSuccessAt = formatJobTime(state.LastSuccessAt)
+			item.NextRunAt = formatJobTime(state.NextRunAt)
+			item.LastError = state.LastError
+		}
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return items
+}
+
+func writeHumanJobsList(stdout io.Writer, items []jobListItem, paths harnessruntime.Paths) {
+	fmt.Fprintln(stdout, "jobs:")
+	for _, item := range items {
+		fmt.Fprintf(stdout, "- name: %s\n", item.Name)
+		fmt.Fprintf(stdout, "  type: %s\n", item.Type)
+		fmt.Fprintf(stdout, "  enabled: %t\n", item.Enabled)
+		if item.Status != "" {
+			fmt.Fprintf(stdout, "  status: %s\n", item.Status)
+		}
+		if item.LastRunAt != "" {
+			fmt.Fprintf(stdout, "  last_run_at: %s\n", item.LastRunAt)
+		}
+		if item.LastSuccessAt != "" {
+			fmt.Fprintf(stdout, "  last_success_at: %s\n", item.LastSuccessAt)
+		}
+		if item.NextRunAt != "" {
+			fmt.Fprintf(stdout, "  next_run_at: %s\n", item.NextRunAt)
+		}
+		if item.LastError != "" {
+			fmt.Fprintf(stdout, "  last_error: %s\n", item.LastError)
+		}
+	}
+	fmt.Fprintf(stdout, "jobs_file: %s\n", paths.JobsPath)
+}
+
+func formatJobTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func (a App) runStatus(args []string, stdout io.Writer, stderr io.Writer) int {
