@@ -8,6 +8,26 @@ Release artifacts are built under `dist/` by:
 ./scripts/build-release.sh 0.1.0-dev
 ```
 
+For published versions, GitHub Releases is the source of truth. The local `dist/` directory is generated output for staging/upload only; do not commit release archives or checksums to git.
+
+Each published version should have:
+
+```text
+Git tag:        v0.1.0
+GitHub Release: v0.1.0
+Assets:
+  agent-harness_0.1.0_linux_amd64.tar.gz
+  agent-harness_0.1.0_linux_arm64.tar.gz
+  checksums.txt
+```
+
+The release tag uses a leading `v`, while the embedded binary version omits it:
+
+```text
+Tag:            v0.1.0
+Binary version: 0.1.0
+```
+
 The first required targets are:
 
 ```text
@@ -44,9 +64,36 @@ Checksums are written to:
 dist/checksums.txt
 ```
 
+## Download a published version
+
+Pick the version and architecture for the target machine. For example:
+
+```bash
+VERSION=0.1.0
+ARCH=linux_amd64
+
+curl -L -o /tmp/agent-harness.tar.gz \
+  "https://github.com/zachfire9/agent-harness/releases/download/v${VERSION}/agent-harness_${VERSION}_${ARCH}.tar.gz"
+
+curl -L -o /tmp/checksums.txt \
+  "https://github.com/zachfire9/agent-harness/releases/download/v${VERSION}/checksums.txt"
+```
+
+Then verify and install from `/tmp`:
+
+```bash
+cd /tmp
+sha256sum -c checksums.txt --ignore-missing
+tar -xzf agent-harness.tar.gz
+install -m 0755 agent-harness ~/.local/bin/agent-harness
+~/.local/bin/agent-harness version
+systemctl --user restart agent-harness@default.service
+~/.local/bin/agent-harness status --instance default
+```
+
 ## Install or update from an artifact
 
-Pick the artifact that matches the target machine architecture, then run:
+If the artifact is already present locally, pick the archive that matches the target machine architecture, then run:
 
 ```bash
 tar -xzf agent-harness_0.1.0-dev_linux_amd64.tar.gz
@@ -89,6 +136,33 @@ install -m 0755 ~/.local/bin/agent-harness.previous ~/.local/bin/agent-harness
 systemctl --user restart agent-harness@default.service
 ~/.local/bin/agent-harness status --instance default
 ```
+
+## Publishing a release
+
+For the current manual release process:
+
+```bash
+VERSION=0.1.0
+
+git tag "v${VERSION}"
+./scripts/build-release.sh "${VERSION}"
+gh release create "v${VERSION}" \
+  dist/agent-harness_${VERSION}_linux_amd64.tar.gz \
+  dist/agent-harness_${VERSION}_linux_arm64.tar.gz \
+  dist/checksums.txt \
+  --title "v${VERSION}" \
+  --generate-notes
+```
+
+Development rules:
+
+- Do not commit generated `dist/` artifacts.
+- Every published release should be tied to a git tag.
+- The release tag should be `v<version>` and the binary version should be `<version>`.
+- Upload `checksums.txt` with every release.
+- Target machines should not need Go or a source checkout.
+- Instance homes must stay separate from binary and version storage.
+- Publishing is manual for now; a later step can move this into GitHub Actions on tag push.
 
 ## Development install from source
 
