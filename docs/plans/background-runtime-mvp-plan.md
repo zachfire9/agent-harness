@@ -44,12 +44,19 @@ Generic design requirement:
 Recommended default paths:
 
 ```text
-Binary:       ~/.local/bin/agent-harness
-Config dir:   ~/.config/agent-harness/<instance>/
-State dir:    ~/.local/state/agent-harness/<instance>/
-Log source:   systemd journal for the user service
-Unit file:    ~/.config/systemd/user/agent-harness@.service
+Binary:        ~/.local/bin/agent-harness
+Instance root: ~/.local/share/agent-harness/instances/
+Instance home: ~/.local/share/agent-harness/instances/<instance>/
+Config:        ~/.local/share/agent-harness/instances/<instance>/config/
+State:         ~/.local/share/agent-harness/instances/<instance>/state/
+Cache:         ~/.local/share/agent-harness/instances/<instance>/cache/
+Work dir:      ~/.local/share/agent-harness/instances/<instance>/work/
+App logs:      ~/.local/share/agent-harness/instances/<instance>/logs/
+Service logs:  systemd journal for the user service
+Unit file:     ~/.config/systemd/user/agent-harness@.service
 ```
+
+The compiled binary should not run out of the source checkout or release extraction directory. Each background instance should have a self-contained instance home. The daemon should use that instance home as its working directory and should read/write config, state, cache, work files, app logs, and status files only inside that home unless the operator explicitly configures another path.
 
 If the implementation uses different paths, document why and keep them instance-aware.
 
@@ -72,22 +79,43 @@ Update `agent-harness` so it can run as a background process under a generic ins
 
 Add the smallest operational runtime that proves `agent-harness` can stay alive and be inspected:
 
-- Add a long-running command, for example:
+- Add an initialization command that creates a self-contained instance home, for example:
+
+  ```bash
+  agent-harness init --instance default
+  ```
+
+- Add a long-running command that uses the instance home, for example:
 
   ```bash
   agent-harness daemon --instance default
   ```
 
-- Add a status command, for example:
+- Add a status command that reads from the instance home, for example:
 
   ```bash
   agent-harness status --instance default
+  ```
+
+- Allow an explicit home override for advanced installs or tests:
+
+  ```bash
+  agent-harness daemon --instance default --home ~/.local/share/agent-harness/instances/default
+  agent-harness status --instance default --home ~/.local/share/agent-harness/instances/default
   ```
 
 - Add service-management documentation or generated unit content for a user-level systemd template:
 
   ```text
   agent-harness@.service
+  ```
+
+  The unit should set the working directory to the instance home and pass the same home to the daemon, conceptually:
+
+  ```ini
+  [Service]
+  ExecStart=%h/.local/bin/agent-harness daemon --instance %i --home %h/.local/share/agent-harness/instances/%i
+  WorkingDirectory=%h/.local/share/agent-harness/instances/%i
   ```
 
 - Support commands equivalent to:
@@ -99,7 +127,7 @@ Add the smallest operational runtime that proves `agent-harness` can stay alive 
   journalctl --user -u agent-harness@default.service -n 100 --no-pager
   ```
 
-- The daemon should write a small status/health file under the configured instance state directory, for example:
+- The daemon should write a small status/health file under the instance home state directory, for example `~/.local/share/agent-harness/instances/default/state/status.json`:
 
   ```json
   {
@@ -139,6 +167,8 @@ Define and document at least these states:
 The implementation should work for any instance name:
 
 ```bash
+agent-harness init --instance default
+agent-harness init --instance worker
 agent-harness daemon --instance default
 agent-harness daemon --instance worker
 agent-harness status --instance default
@@ -148,6 +178,34 @@ systemctl --user status agent-harness@worker.service --no-pager
 ```
 
 Instance names should be validated to avoid path traversal or unsafe systemd unit names. Keep allowed names simple, for example letters, numbers, `_`, and `-`.
+
+### Self-contained instance home
+
+Each instance home should be the only default read/write location for that instance:
+
+```text
+~/.local/share/agent-harness/instances/<instance>/
+  config/
+    config.yaml
+    env
+  state/
+    status.json
+    jobs.json
+    run-history.json
+  cache/
+  work/
+  logs/
+```
+
+Rules:
+
+- `agent-harness init --instance <name>` creates the directory tree and starter config files.
+- `agent-harness daemon --instance <name>` derives the default home from the instance name unless `--home` is provided.
+- `agent-harness status --instance <name>` reads status from the same home resolution logic.
+- The service `WorkingDirectory` should be the instance home, not the source checkout and not a release extraction directory.
+- Runtime files should not be written beside the compiled binary.
+- Multiple instances must not share writable state unless explicitly configured.
+- Secrets should live in config files or environment files under the instance home only when appropriate permissions are documented; status/log files must not echo secret values.
 
 ### Files likely to change
 
@@ -159,6 +217,7 @@ Exact paths may vary after inspecting the current code, but expect something lik
 - Create: `internal/runtime/status.go`
 - Create: `internal/runtime/paths.go`
 - Create: `internal/runtime/service.go`
+- Create: `internal/runtime/instance_home.go`
 - Create: `internal/runtime/*_test.go`
 - Create: `docs/background-runtime.md`
 - Modify: `README.md`
@@ -169,7 +228,10 @@ Exact paths may vary after inspecting the current code, but expect something lik
 Add deterministic unit tests for:
 
 - valid and invalid instance names;
-- deriving config/state paths from an instance name;
+- deriving the default instance home from an instance name;
+- creating the instance home directory tree;
+- resolving explicit `--home` overrides;
+- deriving config/state/cache/work/log paths inside an instance home;
 - writing and reading a status file;
 - stale heartbeat detection;
 - status classification for running/stopped/stale/config-error inputs;
@@ -186,6 +248,7 @@ After Step 01 is implemented, an operator should be able to run:
 ```bash
 go test ./...
 go build -o ~/.local/bin/agent-harness ./cmd/agent-harness
+~/.local/bin/agent-harness init --instance default
 mkdir -p ~/.config/systemd/user
 # Install or generate the user unit documented by the step.
 systemctl --user daemon-reload
@@ -198,6 +261,7 @@ journalctl --user -u agent-harness@default.service -n 100 --no-pager
 
 Expected result:
 
+- the instance home exists under `~/.local/share/agent-harness/instances/default/`;
 - service is active;
 - `agent-harness status --instance default` reports `running`;
 - JSON status is parseable;
@@ -223,16 +287,17 @@ The docs should explain which placeholders change for another machine or instanc
 - `<repo-path>`
 - binary install path
 - instance name
-- config directory
-- state directory
+- instance home/root
+- config/state/cache/work/log directories inside the instance home
 - systemd unit name
 
 ### Acceptance criteria
 
 Step 01 is complete when:
 
+- `agent-harness init --instance ...` creates a self-contained instance home;
 - the background daemon can be started by a user-level service on a local Linux host;
-- the same service template can run another named instance;
+- the same service template can run another named instance with a separate instance home;
 - an operator can check status with one `agent-harness status --instance ...` command;
 - an operator can inspect logs with one documented `journalctl` command;
 - failed startup/config errors are visible without reading source code;
@@ -363,6 +428,7 @@ Step 02 is complete when:
 - an operator can identify exactly what version/commit is running;
 - a binary can be installed without a source checkout on the target machine;
 - status output includes version metadata;
+- release-artifact install docs place the binary separately from per-instance homes;
 - update docs distinguish source-based development updates from release-artifact installs;
 - the plan leaves room for later GoReleaser/GitHub Releases automation without requiring it now.
 
