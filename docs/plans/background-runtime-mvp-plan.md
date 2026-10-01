@@ -6,7 +6,7 @@
 
 Build a generic background runtime for `agent-harness` that can initially run on a local Linux host, while remaining reusable for other `agent-harness` instances on other machines.
 
-The first useful deliverable is **not** a daily brief or birthday email. The first deliverable is:
+The first useful deliverable is **not** a content feature or delivery integration. The first deliverable is:
 
 - `agent-harness` can run unattended in the background;
 - it has a stable instance name/config/state/log layout;
@@ -38,7 +38,7 @@ Generic design requirement:
 
 - Nothing should be hardcoded to a specific username, repo checkout, home directory, or machine name.
 - Runtime paths should be derived from config, flags, or XDG-style defaults.
-- Every service should have an explicit instance name, for example `default`, `daily-brief`, or `birthday-countdown`.
+- Every service should have an explicit instance name, for example `default`, `worker`, or `scheduler`.
 - Status checks should work the same way for the first host and future instances.
 
 Recommended default paths:
@@ -140,11 +140,11 @@ The implementation should work for any instance name:
 
 ```bash
 agent-harness daemon --instance default
-agent-harness daemon --instance birthday-countdown
+agent-harness daemon --instance worker
 agent-harness status --instance default
-agent-harness status --instance birthday-countdown
+agent-harness status --instance worker
 systemctl --user status agent-harness@default.service --no-pager
-systemctl --user status agent-harness@birthday-countdown.service --no-pager
+systemctl --user status agent-harness@worker.service --no-pager
 ```
 
 Instance names should be validated to avoid path traversal or unsafe systemd unit names. Keep allowed names simple, for example letters, numbers, `_`, and `-`.
@@ -257,7 +257,7 @@ Add a minimal no-op or heartbeat job mechanism so a running instance can prove i
 - Add a single built-in `noop` or `heartbeat` job.
 - Record last run time, last success, last error, and next run time in instance state.
 - Surface job status through `agent-harness status`.
-- Keep the design generic so later birthday/email/daily-brief jobs plug in as job types.
+- Keep the design generic so later email, daily-brief, or other scheduled jobs plug in as job types.
 
 ### Verification
 
@@ -281,7 +281,7 @@ journalctl --user -u agent-harness@default.service -n 100 --no-pager
 
 Pick one later:
 
-- configurable birthday countdown email;
+- configurable email job;
 - daily brief email;
 - local file/log reminder;
 - another small scheduled task Zach wants first.
@@ -307,4 +307,4 @@ If Zach approves this plan, start with only Step 01:
 Step 01 — Background runtime and status checks
 ```
 
-That gives a reusable operational base before adding birthday countdowns, Gmail, Google Docs, Telegram, AWS, or model calls.
+That gives a reusable operational base before adding Gmail, Google Docs, Telegram, AWS, model calls, or any content-specific scheduled job.
