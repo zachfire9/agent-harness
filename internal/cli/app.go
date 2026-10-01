@@ -4,20 +4,27 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/config"
 	"github.com/zachfire9/agent-harness/internal/llm"
 	"github.com/zachfire9/agent-harness/internal/runlog"
+	harnessruntime "github.com/zachfire9/agent-harness/internal/runtime"
 	"github.com/zachfire9/agent-harness/internal/tools"
 	"github.com/zachfire9/agent-harness/internal/vectorstore"
 )
 
 const defaultMessage = "agent-harness: staged learning CLI ready"
+const appVersion = "dev"
 
 // App holds command dependencies so CLI behavior can be tested without real API calls.
 type App struct {
@@ -135,12 +142,175 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return a.runAsk(args[2:], stdout, stderr)
 	case "chat":
 		return a.runChat(args[2:], stdout, stderr)
+	case "daemon":
+		return a.runDaemon(args[2:], stdout, stderr)
+	case "init":
+		return a.runInit(args[2:], stdout, stderr)
+	case "status":
+		return a.runStatus(args[2:], stdout, stderr)
 	case "tool":
 		return a.runTool(args[2:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[1])
 		return 1
 	}
+}
+
+func (a App) runInit(args []string, stdout io.Writer, stderr io.Writer) int {
+	opts, err := parseRuntimeOptions(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "init error: %v\n", err)
+		return 1
+	}
+	paths, err := resolveRuntimePaths(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "init error: %v\n", err)
+		return 1
+	}
+	if err := harnessruntime.InitInstance(paths); err != nil {
+		fmt.Fprintf(stderr, "init error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "initialized instance %s at %s\n", opts.instance, paths.Home)
+	return 0
+}
+
+func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
+	opts, err := parseRuntimeOptions(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "daemon error: %v\n", err)
+		return 1
+	}
+	paths, err := resolveRuntimePaths(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "daemon error: %v\n", err)
+		return 1
+	}
+	if err := harnessruntime.InitInstance(paths); err != nil {
+		fmt.Fprintf(stderr, "daemon error: %v\n", err)
+		return 1
+	}
+	if opts.once {
+		now := time.Now().UTC()
+		if err := harnessruntime.WriteHeartbeat(paths, opts.instance, now, now, appVersion); err != nil {
+			fmt.Fprintf(stderr, "daemon error: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "heartbeat written for instance %s\n", opts.instance)
+		return 0
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := harnessruntime.RunDaemon(ctx, paths, opts.instance, appVersion, time.Minute); err != nil {
+		fmt.Fprintf(stderr, "daemon error: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func (a App) runStatus(args []string, stdout io.Writer, stderr io.Writer) int {
+	opts, err := parseRuntimeOptions(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "status error: %v\n", err)
+		return 1
+	}
+	paths, err := resolveRuntimePaths(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "status error: %v\n", err)
+		return 1
+	}
+	status, err := harnessruntime.ReadStatus(paths.StatusPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "status error: %v\n", err)
+			return 1
+		}
+		status = harnessruntime.Status{Instance: opts.instance, Status: harnessruntime.StateUnknown}
+	}
+	if opts.json {
+		data, err := json.MarshalIndent(status, "", "  ")
+		if err != nil {
+			fmt.Fprintf(stderr, "status error: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(data))
+		return 0
+	}
+	writeHumanStatus(stdout, status, opts.instance, paths)
+	return 0
+}
+
+type runtimeOptions struct {
+	instance string
+	home     string
+	json     bool
+	once     bool
+}
+
+func parseRuntimeOptions(args []string) (runtimeOptions, error) {
+	opts := runtimeOptions{instance: "default"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--instance":
+			if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
+				return runtimeOptions{}, fmt.Errorf("--instance requires a value")
+			}
+			opts.instance = args[i+1]
+			i++
+		case "--home":
+			if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
+				return runtimeOptions{}, fmt.Errorf("--home requires a value")
+			}
+			opts.home = args[i+1]
+			i++
+		case "--json":
+			opts.json = true
+		case "--once":
+			opts.once = true
+		default:
+			return runtimeOptions{}, fmt.Errorf("unknown option: %s", args[i])
+		}
+	}
+	if err := harnessruntime.ValidateInstanceName(opts.instance); err != nil {
+		return runtimeOptions{}, err
+	}
+	return opts, nil
+}
+
+func resolveRuntimePaths(opts runtimeOptions) (harnessruntime.Paths, error) {
+	if opts.home != "" {
+		return harnessruntime.PathsForHome(opts.home), nil
+	}
+	dataRoot := os.Getenv("XDG_DATA_HOME")
+	if dataRoot == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return harnessruntime.Paths{}, err
+		}
+		dataRoot = filepath.Join(home, ".local", "share")
+	}
+	return harnessruntime.LinuxPaths(dataRoot, opts.instance)
+}
+
+func writeHumanStatus(stdout io.Writer, status harnessruntime.Status, instance string, paths harnessruntime.Paths) {
+	state := status.Status
+	if state == "" {
+		state = harnessruntime.StateUnknown
+	}
+	fmt.Fprintf(stdout, "instance: %s\n", instance)
+	fmt.Fprintf(stdout, "status: %s\n", state)
+	if status.Version != "" {
+		fmt.Fprintf(stdout, "version: %s\n", status.Version)
+	}
+	if status.PID != 0 {
+		fmt.Fprintf(stdout, "pid: %d\n", status.PID)
+	}
+	fmt.Fprintf(stdout, "home: %s\n", paths.Home)
+	fmt.Fprintf(stdout, "status_file: %s\n", paths.StatusPath)
+	fmt.Fprintln(stdout, "service_status_hint:")
+	fmt.Fprintf(stdout, "  systemctl --user status agent-harness@%s.service --no-pager\n", instance)
+	fmt.Fprintln(stdout, "logs_hint:")
+	fmt.Fprintf(stdout, "  journalctl --user -u agent-harness@%s.service -n 100 --no-pager\n", instance)
 }
 
 func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int {
