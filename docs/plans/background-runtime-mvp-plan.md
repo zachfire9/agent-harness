@@ -632,7 +632,7 @@ agent-harness jobs list --instance default --json
 
 - **Status:** Completed
 - **Branch:** `step-26-local-checkin-job`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/28
 - **Concept:** The first user-visible scheduled behavior should stay local and low-risk: prove the scheduler can produce a useful artifact without email, model calls, or external accounts.
 
 ### Objective
