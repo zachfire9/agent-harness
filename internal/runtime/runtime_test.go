@@ -70,6 +70,13 @@ func TestInitInstanceCreatesSelfContainedHome(t *testing.T) {
 			t.Fatalf("expected %s to be a directory", dir)
 		}
 	}
+	secretsInfo, err := os.Stat(filepath.Join(paths.ConfigDir, "secrets"))
+	if err != nil {
+		t.Fatalf("expected google secrets directory: %v", err)
+	}
+	if secretsInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("expected secrets directory mode 0700, got %o", secretsInfo.Mode().Perm())
+	}
 	if _, err := os.Stat(filepath.Join(paths.ConfigDir, "config.yaml")); err != nil {
 		t.Fatalf("expected starter config.yaml: %v", err)
 	}
@@ -668,6 +675,136 @@ func TestRunDaemonRecordsConfigErrorForInvalidJobConfig(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeConfigParsesGoogleConfig(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scope_profile: "gmail_send"
+jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if cfg.Google.ClientCredentialsPath != "config/secrets/google-client.json" || cfg.Google.TokenPath != "config/secrets/google-token.json" || cfg.Google.AccountHint != "agent@example.com" || cfg.Google.ScopeProfile != "gmail_send" {
+		t.Fatalf("unexpected google config: %#v", cfg.Google)
+	}
+	if got := cfg.Google.Scopes(); len(got) != 1 || got[0] != GoogleScopeGmailSend {
+		t.Fatalf("unexpected gmail scopes: %#v", got)
+	}
+}
+
+func TestReadRuntimeConfigRejectsUnknownGoogleScopeProfile(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  scope_profile: "drive_all"
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), `unknown google scope_profile "drive_all"`) {
+		t.Fatalf("expected unknown google scope error, got %v", err)
+	}
+}
+
+func TestReadRuntimeConfigRejectsGoogleSecretPathOutsideInstanceHome(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  client_credentials_path: "/tmp/google-client.json"
+  token_path: "../google-token.json"
+  scope_profile: "docs_readonly"
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), `invalid google client_credentials_path`) {
+		t.Fatalf("expected invalid google secret path error, got %v", err)
+	}
+}
+
+func TestGoogleAuthStatusRedactsTokenValues(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	cfg := GoogleConfig{TokenPath: "config/secrets/google-token.json", ScopeProfile: "gmail_send"}
+	secretToken := "ya29.secret-access-token"
+	secretRefresh := "1//secret-refresh-token"
+	writeRuntimeTestFile(t, paths.Home, cfg.TokenPath, `{"access_token":"`+secretToken+`","refresh_token":"`+secretRefresh+`","expiry":"2026-01-02T03:04:05Z","scope":"https://www.googleapis.com/auth/gmail.send"}`)
+
+	status, err := GoogleAuthStatus(paths, cfg)
+	if err != nil {
+		t.Fatalf("google auth status failed: %v", err)
+	}
+	if !status.Connected || status.TokenExpiry != "2026-01-02T03:04:05Z" || status.ScopeProfile != "gmail_send" || status.TokenPath != cfg.TokenPath {
+		t.Fatalf("unexpected google auth status: %#v", status)
+	}
+	rendered := status.SafeString()
+	if strings.Contains(rendered, secretToken) || strings.Contains(rendered, secretRefresh) || strings.Contains(rendered, "access_token") || strings.Contains(rendered, "refresh_token") {
+		t.Fatalf("google auth status leaked token material: %q", rendered)
+	}
+}
+
+func TestRevokeGoogleTokenRemovesOnlyTokenFile(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	cfg := GoogleConfig{ClientCredentialsPath: "config/secrets/google-client.json", TokenPath: "config/secrets/google-token.json", ScopeProfile: "gmail_send"}
+	writeRuntimeTestFile(t, paths.Home, cfg.ClientCredentialsPath, `{"installed":{"client_id":"placeholder"}}`)
+	writeRuntimeTestFile(t, paths.Home, cfg.TokenPath, `{"access_token":"secret"}`)
+
+	if err := RevokeGoogleToken(paths, cfg); err != nil {
+		t.Fatalf("revoke google token failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(paths.Home, filepath.FromSlash(cfg.TokenPath))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected token file removed, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(paths.Home, filepath.FromSlash(cfg.ClientCredentialsPath))); err != nil {
+		t.Fatalf("client credentials should remain: %v", err)
+	}
+}
+
 func TestStatusRoundTripAndJSONShape(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -742,6 +879,17 @@ func TestSystemdUserUnitUsesInstanceHomeAndNoMachineSpecificPaths(t *testing.T) 
 	}
 	if strings.Contains(unit, "/home/") {
 		t.Fatalf("unit must not contain machine-specific home paths:\n%s", unit)
+	}
+}
+
+func writeRuntimeTestFile(t *testing.T, root string, relativePath string, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relativePath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
 	}
 }
 

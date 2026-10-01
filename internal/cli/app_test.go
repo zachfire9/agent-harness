@@ -1061,6 +1061,108 @@ func TestRunJobsRunRejectsUnknownAndDisabledJobs(t *testing.T) {
 	}
 }
 
+func TestRunGoogleAuthStatusRedactsSecrets(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scope_profile: "gmail_send"
+`)
+	writeCLITestFile(t, home, "config/secrets/google-token.json", `{"access_token":"ya29.secret","refresh_token":"1//refresh-secret","expiry":"2026-01-02T03:04:05Z","scope":"https://www.googleapis.com/auth/gmail.send"}`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "google", "auth", "status", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, want := range []string{"google_auth:", "connected: true", "account_hint: agent@example.com", "scope_profile: gmail_send", "token_expiry: 2026-01-02T03:04:05Z", "token_path: config/secrets/google-token.json"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected google auth status to contain %q, got %q", want, stdout)
+		}
+	}
+	for _, secret := range []string{"ya29.secret", "1//refresh-secret", "access_token", "refresh_token"} {
+		if strings.Contains(stdout, secret) || strings.Contains(stderr, secret) {
+			t.Fatalf("google auth status leaked secret %q; stdout=%q stderr=%q", secret, stdout, stderr)
+		}
+	}
+}
+
+func TestRunGoogleAuthRevokeRequiresConfirmationAndDeletesToken(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  scope_profile: "gmail_send"
+`)
+	writeCLITestFile(t, home, "config/secrets/google-token.json", `{"access_token":"ya29.secret"}`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "google", "auth", "revoke", "--instance", "default", "--home", home)
+	if exitCode == 0 {
+		t.Fatal("expected revoke without confirmation to fail")
+	}
+	if stdout != "" || !strings.Contains(stderr, "confirmation required") {
+		t.Fatalf("expected confirmation error, stdout=%q stderr=%q", stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(home, "config", "secrets", "google-token.json")); err != nil {
+		t.Fatalf("token should remain before confirmed revoke: %v", err)
+	}
+
+	stdout, stderr, exitCode = runCLI("agent-harness", "google", "auth", "revoke", "--instance", "default", "--home", home, "--confirm", "revoke-google-token")
+	if exitCode != 0 {
+		t.Fatalf("expected confirmed revoke exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "revoked local google token") {
+		t.Fatalf("expected revoke confirmation, got %q", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(home, "config", "secrets", "google-token.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected token file removed, got %v", err)
+	}
+}
+
+func TestRunGoogleAuthStartPrintsSecretSafeScopeInstructions(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scope_profile: "docs_readonly"
+`)
+	writeCLITestFile(t, home, "config/secrets/google-client.json", `{"installed":{"client_id":"fake-client-id","client_secret":"super-secret-client-secret"}}`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "google", "auth", "start", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	for _, want := range []string{"google auth start", "account_hint: agent@example.com", "scope_profile: docs_readonly", "https://www.googleapis.com/auth/documents.readonly", "client_credentials_path: config/secrets/google-client.json", "token_path: config/secrets/google-token.json"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected auth start output to contain %q, got %q", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "super-secret-client-secret") || strings.Contains(stdout, "client_secret") {
+		t.Fatalf("auth start should not print client secret material, got %q", stdout)
+	}
+}
+
 func runCLI(args ...string) (stdout string, stderr string, exitCode int) {
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer

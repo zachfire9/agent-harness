@@ -44,6 +44,7 @@ The project currently has:
 - user-level background runtime commands for named instances, status files, and systemd user service installation
 - version metadata embedded at build time plus manual release artifacts for Linux amd64/arm64 installs
 - a configurable scheduled-job registry with a default heartbeat job, a local check-in job, and a file-outbox notification test job that can be inspected or manually triggered from the CLI
+- Google account connection metadata commands for secret-safe auth status, scope inspection, and local token revocation
 
 ## Project layout
 

@@ -149,6 +149,8 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return a.runInit(args[2:], stdout, stderr)
 	case "jobs":
 		return a.runJobs(args[2:], stdout, stderr)
+	case "google":
+		return a.runGoogle(args[2:], stdout, stderr)
 	case "service":
 		return a.runService(args[2:], stdout, stderr)
 	case "status":
@@ -257,6 +259,120 @@ func (a App) runService(args []string, stdout io.Writer, stderr io.Writer) int {
 	fmt.Fprintln(stdout, "  systemctl --user daemon-reload")
 	fmt.Fprintln(stdout, "  systemctl --user enable --now agent-harness@default.service")
 	return 0
+}
+
+func (a App) runGoogle(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) < 2 || args[0] != "auth" {
+		fmt.Fprintln(stderr, "google error: unsupported google command")
+		return 1
+	}
+	switch args[1] {
+	case "start":
+		return a.runGoogleAuthStart(args[2:], stdout, stderr)
+	case "status":
+		return a.runGoogleAuthStatus(args[2:], stdout, stderr)
+	case "revoke":
+		return a.runGoogleAuthRevoke(args[2:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "google error: unsupported google auth command")
+		return 1
+	}
+}
+
+func (a App) runGoogleAuthStart(args []string, stdout io.Writer, stderr io.Writer) int {
+	opts, err := parseRuntimeOptions(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	paths, cfg, ok := loadGoogleCommandConfig(opts, stderr)
+	if !ok {
+		return 1
+	}
+	instructions, err := harnessruntime.GoogleAuthStartInstructions(paths, cfg.Google)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, instructions)
+	return 0
+}
+
+func (a App) runGoogleAuthStatus(args []string, stdout io.Writer, stderr io.Writer) int {
+	opts, err := parseRuntimeOptions(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	paths, cfg, ok := loadGoogleCommandConfig(opts, stderr)
+	if !ok {
+		return 1
+	}
+	status, err := harnessruntime.GoogleAuthStatus(paths, cfg.Google)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, status.SafeString())
+	return 0
+}
+
+func (a App) runGoogleAuthRevoke(args []string, stdout io.Writer, stderr io.Writer) int {
+	confirm, runtimeArgs, err := parseConfirmFlag(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	if confirm != "revoke-google-token" {
+		fmt.Fprintln(stderr, "google error: confirmation required: pass --confirm revoke-google-token")
+		return 1
+	}
+	opts, err := parseRuntimeOptions(runtimeArgs)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	paths, cfg, ok := loadGoogleCommandConfig(opts, stderr)
+	if !ok {
+		return 1
+	}
+	if err := harnessruntime.RevokeGoogleToken(paths, cfg.Google); err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "revoked local google token: %s\n", cfg.Google.WithDefaults().TokenPath)
+	return 0
+}
+
+func loadGoogleCommandConfig(opts runtimeOptions, stderr io.Writer) (harnessruntime.Paths, harnessruntime.RuntimeConfig, bool) {
+	paths, err := resolveRuntimePaths(opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return harnessruntime.Paths{}, harnessruntime.RuntimeConfig{}, false
+	}
+	cfg, err := harnessruntime.ReadRuntimeConfig(paths)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return harnessruntime.Paths{}, harnessruntime.RuntimeConfig{}, false
+	}
+	return paths, cfg, true
+}
+
+func parseConfirmFlag(args []string) (string, []string, error) {
+	runtimeArgs := make([]string, 0, len(args))
+	var confirm string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--confirm" {
+			if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
+				return "", nil, fmt.Errorf("--confirm requires a value")
+			}
+			confirm = args[i+1]
+			i++
+			continue
+		}
+		runtimeArgs = append(runtimeArgs, args[i])
+	}
+	return confirm, runtimeArgs, nil
 }
 
 func parseServiceInstallOptions(args []string) (string, error) {

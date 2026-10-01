@@ -133,6 +133,47 @@ Manual runs update `state/jobs.json` just like scheduled daemon runs. Unknown jo
 
 Future job types should reuse this config/state shape instead of creating job-specific status files.
 
+## Configure Google account connection metadata
+
+Google integrations are configured with paths and safe metadata only. Do not paste client secrets, authorization codes, access tokens, or refresh tokens into `config/config.yaml`.
+
+Example:
+
+```yaml
+google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scope_profile: "gmail_send"
+```
+
+Supported narrow scope profiles:
+
+- `gmail_send`: requests `https://www.googleapis.com/auth/gmail.send` for a future Gmail notifier.
+- `docs_readonly`: requests `https://www.googleapis.com/auth/documents.readonly` for a future Google Docs source adapter.
+
+`agent-harness init` creates `config/secrets/` with restricted directory permissions. Store Google client credentials and token files there with `0600` file permissions. These files are local secrets and must not be committed.
+
+Inspect Google auth state without printing token values:
+
+```bash
+agent-harness google auth status --instance default
+```
+
+Start the safe auth handoff/instructions for the configured scope profile:
+
+```bash
+agent-harness google auth start --instance default
+```
+
+Remove the local Google token file without deleting the client credentials file:
+
+```bash
+agent-harness google auth revoke --instance default --confirm revoke-google-token
+```
+
+The auth status/start commands may print safe metadata such as account hint, scope profile, requested scopes, token expiry, and configured paths. They must not print access tokens, refresh tokens, client secrets, authorization codes, or raw credential JSON. To fully revoke cloud-side access, also remove the app from the connected Google account's security settings.
+
 ## Run a daemon smoke test
 
 ```bash
