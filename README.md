@@ -41,6 +41,8 @@ The project currently has:
 - opt-in `--trace` output for model calls, context compaction reports, tool calls/results, and final-answer summaries without dumping full prompt/tool content
 - durable JSONL run/session logs under the configured local run-log directory, with structured context/truncation records and secret redaction
 - provider-neutral vector store abstraction with a default `none` implementation for future RAG support without requiring a vector database yet
+- user-level background runtime commands for named instances, status files, and systemd user service installation
+- version metadata embedded at build time plus manual release artifacts for Linux amd64/arm64 installs
 
 ## Project layout
 
@@ -56,8 +58,12 @@ agent-harness/
     runlog/              # durable JSONL event writer
     tools/               # tool interface, registry, and built-in tools
     vectorstore/         # future-ready vector store abstraction
-  docs/plans/
-    agent-harness-learning-plan.md
+  docs/
+    background-runtime.md
+    install-release.md
+    plans/
+      agent-harness-learning-plan.md
+      background-runtime-mvp-plan.md
   README.md
 ```
 

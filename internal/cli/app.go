@@ -21,10 +21,10 @@ import (
 	harnessruntime "github.com/zachfire9/agent-harness/internal/runtime"
 	"github.com/zachfire9/agent-harness/internal/tools"
 	"github.com/zachfire9/agent-harness/internal/vectorstore"
+	"github.com/zachfire9/agent-harness/internal/version"
 )
 
 const defaultMessage = "agent-harness: staged learning CLI ready"
-const appVersion = "dev"
 
 // App holds command dependencies so CLI behavior can be tested without real API calls.
 type App struct {
@@ -152,10 +152,21 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return a.runStatus(args[2:], stdout, stderr)
 	case "tool":
 		return a.runTool(args[2:], stdout, stderr)
+	case "version":
+		return a.runVersion(args[2:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[1])
 		return 1
 	}
+}
+
+func (a App) runVersion(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintf(stderr, "version error: unknown option: %s\n", args[0])
+		return 1
+	}
+	fmt.Fprint(stdout, version.Info().FormatHuman())
+	return 0
 }
 
 func (a App) runInit(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -192,9 +203,10 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "daemon error: %v\n", err)
 		return 1
 	}
+	metadata := version.Info()
 	if opts.test {
 		now := time.Now().UTC()
-		if err := harnessruntime.WriteHeartbeat(paths, opts.instance, now, now, appVersion); err != nil {
+		if err := harnessruntime.WriteHeartbeat(paths, opts.instance, now, now, metadata); err != nil {
 			fmt.Fprintf(stderr, "daemon error: %v\n", err)
 			return 1
 		}
@@ -203,7 +215,7 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := harnessruntime.RunDaemon(ctx, paths, opts.instance, appVersion, time.Minute); err != nil {
+	if err := harnessruntime.RunDaemon(ctx, paths, opts.instance, metadata, time.Minute); err != nil {
 		fmt.Fprintf(stderr, "daemon error: %v\n", err)
 		return 1
 	}
@@ -360,6 +372,15 @@ func writeHumanStatus(stdout io.Writer, status harnessruntime.Status, instance s
 	fmt.Fprintf(stdout, "status: %s\n", state)
 	if status.Version != "" {
 		fmt.Fprintf(stdout, "version: %s\n", status.Version)
+	}
+	if status.Commit != "" {
+		fmt.Fprintf(stdout, "commit: %s\n", status.Commit)
+	}
+	if status.BuildDate != "" {
+		fmt.Fprintf(stdout, "build_date: %s\n", status.BuildDate)
+	}
+	if status.Dirty != "" {
+		fmt.Fprintf(stdout, "dirty: %s\n", status.Dirty)
 	}
 	if status.PID != 0 {
 		fmt.Fprintf(stdout, "pid: %d\n", status.PID)

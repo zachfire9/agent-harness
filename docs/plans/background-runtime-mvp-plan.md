@@ -75,9 +75,9 @@ If the implementation uses different paths, document why and keep them instance-
 
 ## Step 01 — Background runtime and status checks
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-21-background-runtime-status`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/23
 - **Concept:** Before an agent can do useful scheduled work, it needs a reliable operational shell: install, start, stop, restart, status, logs, health, and update instructions.
 
 ### Objective
@@ -346,7 +346,7 @@ Step 01 is complete when:
 
 ## Step 02 — Versioned binary build and install workflow
 
-- **Status:** Pending
+- **Status:** In review
 - **Branch:** `step-22-versioned-binary-install`
 - **Pull Request:** TBD
 - **Concept:** Once the runtime shell exists, package it as a versioned binary that can be installed on this host or another machine without requiring a source checkout or Go toolchain.
