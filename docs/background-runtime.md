@@ -100,6 +100,8 @@ journalctl --user -u agent-harness@default.service -n 100 --no-pager
 
 ## Update from source during development
 
+Use this flow only on development hosts that update directly from a source checkout. Release-based installs should use the versioned binary update flow once release artifacts exist.
+
 ```bash
 git pull --ff-only
 go test ./...
