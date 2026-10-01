@@ -180,6 +180,66 @@ func TestReadRuntimeConfigRejectsInvalidJobInterval(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeConfigParsesLocalCheckinJobFields(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `jobs:
+  - name: daily-checkin
+    type: local_checkin
+    enabled: true
+    interval_seconds: 86400
+    message: "agent-harness is alive"
+    output_path: "work/checkins.jsonl"
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if len(cfg.Jobs) != 1 {
+		t.Fatalf("expected one job, got %#v", cfg.Jobs)
+	}
+	job := cfg.Jobs[0]
+	if job.Name != "daily-checkin" || job.Type != "local_checkin" || job.Message != "agent-harness is alive" || job.OutputPath != "work/checkins.jsonl" || job.Interval != 24*time.Hour {
+		t.Fatalf("unexpected local checkin config: %#v", job)
+	}
+}
+
+func TestReadRuntimeConfigRejectsLocalCheckinOutputOutsideInstanceHome(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	for _, outputPath := range []string{"../outside.jsonl", "/tmp/outside.jsonl"} {
+		t.Run(outputPath, func(t *testing.T) {
+			config := `jobs:
+  - name: daily-checkin
+    type: local_checkin
+    enabled: true
+    interval_seconds: 60
+    output_path: "` + outputPath + `"
+`
+			if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+				t.Fatalf("write config failed: %v", err)
+			}
+			_, err = ReadRuntimeConfig(paths)
+			if err == nil || !strings.Contains(err.Error(), "output_path") {
+				t.Fatalf("expected output_path validation error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestHeartbeatJobStateRoundTripAndJSONShape(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -265,6 +325,99 @@ func TestRunConfiguredJobsSkipsDisabledJobsAndMaintainsIndependentState(t *testi
 	}
 }
 
+func TestRunLocalCheckinJobWritesOneJSONRecordPerRun(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{
+		Name:       "daily-checkin",
+		Type:       "local_checkin",
+		Enabled:    true,
+		Interval:   time.Hour,
+		Message:    "agent-harness is alive",
+		OutputPath: "work/checkins.jsonl",
+	}}}
+
+	state, err := RunConfiguredJobNow(paths, cfg, "daily-checkin", now)
+	if err != nil {
+		t.Fatalf("run local checkin failed: %v", err)
+	}
+	if state.Status != JobSucceeded || state.OutputPath != "work/checkins.jsonl" {
+		t.Fatalf("expected successful checkin state with output path, got %#v", state)
+	}
+	raw, err := os.ReadFile(filepath.Join(paths.Home, "work", "checkins.jsonl"))
+	if err != nil {
+		t.Fatalf("expected checkins file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected one JSONL record, got %d in %q", len(lines), string(raw))
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
+		t.Fatalf("expected JSON record, got %q: %v", lines[0], err)
+	}
+	if record["job"] != "daily-checkin" || record["message"] != "agent-harness is alive" || record["status"] != "succeeded" || record["timestamp"] != "2026-01-01T12:00:00Z" {
+		t.Fatalf("unexpected checkin record: %#v", record)
+	}
+}
+
+func TestRunLocalCheckinJobUsesSafeDefaults(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{Name: "daily-checkin", Type: "local_checkin", Enabled: true, Interval: time.Hour}}}
+
+	state, err := RunConfiguredJobNow(paths, cfg, "daily-checkin", now)
+	if err != nil {
+		t.Fatalf("run local checkin failed: %v", err)
+	}
+	if state.OutputPath != "work/checkins.jsonl" {
+		t.Fatalf("expected default output path, got %#v", state)
+	}
+	raw, err := os.ReadFile(filepath.Join(paths.Home, state.OutputPath))
+	if err != nil {
+		t.Fatalf("expected checkins file: %v", err)
+	}
+	if !strings.Contains(string(raw), `"message":"agent-harness is alive"`) {
+		t.Fatalf("expected default message in %s", string(raw))
+	}
+}
+
+func TestRunLocalCheckinJobRecordsWriteFailure(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.Home, "work"), 0o755); err != nil {
+		t.Fatalf("mkdir work: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.Home, "work", "blocked"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write blocked file: %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{Name: "daily-checkin", Type: "local_checkin", Enabled: true, Interval: time.Hour, OutputPath: "work/blocked/checkins.jsonl"}}}
+
+	state, err := RunConfiguredJobNow(paths, cfg, "daily-checkin", now)
+	if err == nil {
+		t.Fatal("expected write failure")
+	}
+	if state.Status != JobFailed || state.LastError == "" || state.OutputPath != "work/blocked/checkins.jsonl" {
+		t.Fatalf("expected failed state with output path and error, got %#v", state)
+	}
+	jobs, readErr := ReadJobs(paths.JobsPath)
+	if readErr != nil {
+		t.Fatalf("read jobs failed: %v", readErr)
+	}
+	if got := jobs.Jobs["daily-checkin"]; got.Status != JobFailed || got.LastError == "" || got.OutputPath != "work/blocked/checkins.jsonl" {
+		t.Fatalf("expected persisted failed checkin state, got %#v", got)
+	}
+}
+
 func TestRunConfiguredJobsHonorsNextRunAt(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -332,7 +485,7 @@ type failingJob struct {
 	err string
 }
 
-func (f failingJob) Run(now time.Time, cfg JobConfig) (JobState, error) {
+func (f failingJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
 	return JobState{}, errors.New(f.err)
 }
 

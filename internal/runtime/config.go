@@ -13,10 +13,12 @@ import (
 const defaultHeartbeatJobInterval = time.Minute
 
 type JobConfig struct {
-	Name     string
-	Type     string
-	Enabled  bool
-	Interval time.Duration
+	Name       string
+	Type       string
+	Enabled    bool
+	Interval   time.Duration
+	Message    string
+	OutputPath string
 }
 
 type RuntimeConfig struct {
@@ -121,6 +123,10 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error)
 				return nil, true, 0, err
 			}
 			current.Interval = interval
+		case "message":
+			current.Message = value
+		case "output_path":
+			current.OutputPath = value
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -150,12 +156,31 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 			return fmt.Errorf("duplicate job name %q", job.Name)
 		}
 		seen[job.Name] = true
-		if job.Type != "heartbeat" {
+		if job.Type != "heartbeat" && job.Type != "local_checkin" {
 			return fmt.Errorf("unknown job type %q for job %q", job.Type, job.Name)
 		}
 		if job.Interval <= 0 {
 			return fmt.Errorf("invalid interval_seconds for job %q", job.Name)
 		}
+		if job.Type == "local_checkin" {
+			if err := validateInstanceRelativePath(job.OutputPath); err != nil {
+				return fmt.Errorf("invalid output_path for job %q: %w", job.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateInstanceRelativePath(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("must be relative")
+	}
+	clean := filepath.Clean(path)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("must stay under instance home")
 	}
 	return nil
 }

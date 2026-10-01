@@ -66,9 +66,30 @@ Each job state records:
 - last run time;
 - last success time;
 - last error, if any;
-- next run time.
+- next run time;
+- output path, when a job produces a local artifact.
 
-Multiple enabled jobs can be configured independently. Disabled jobs are skipped. Unknown job types or invalid intervals are treated as configuration errors and are surfaced through status output. For backward compatibility, older configs with `heartbeat_job_interval_seconds` still configure the default heartbeat job when no `jobs:` list is present.
+Multiple enabled jobs can be configured independently. Disabled jobs are skipped. Unknown job types, invalid intervals, and unsafe local output paths are treated as configuration errors and are surfaced through status output. For backward compatibility, older configs with `heartbeat_job_interval_seconds` still configure the default heartbeat job when no `jobs:` list is present.
+
+### Local check-in jobs
+
+The `local_checkin` job type appends one compact JSONL record per run to an instance-owned file. It is the first local, user-visible scheduled artifact and does not call email, Telegram, Google, or any model provider.
+
+Example:
+
+```yaml
+jobs:
+  - name: daily-checkin
+    type: local_checkin
+    enabled: true
+    interval_seconds: 86400
+    message: "agent-harness is alive"
+    output_path: "work/checkins.jsonl"
+```
+
+`message` defaults to `agent-harness is alive` when omitted. `output_path` defaults to `work/checkins.jsonl` and must be a relative path that stays inside the instance home.
+
+Each JSONL record includes the job name, timestamp, message, and success status. Job status points to the output file path but does not dump the file contents.
 
 ## Inspect and manually run jobs
 
@@ -85,6 +106,7 @@ Run a configured job immediately through the same registry used by the daemon:
 
 ```bash
 agent-harness jobs run heartbeat --instance default
+agent-harness jobs run daily-checkin --instance default
 ```
 
 Manual runs update `state/jobs.json` just like scheduled daemon runs. Unknown jobs, disabled jobs, and invalid job config return controlled non-zero errors. The command does not require `systemd` or a background daemon, which makes it useful for debugging instance config before enabling the service.

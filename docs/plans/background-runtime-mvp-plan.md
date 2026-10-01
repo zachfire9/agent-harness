@@ -630,7 +630,7 @@ agent-harness jobs list --instance default --json
 
 ## Step 06 — First useful local job: append a timestamped check-in file
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-26-local-checkin-job`
 - **Pull Request:** TBD
 - **Concept:** The first user-visible scheduled behavior should stay local and low-risk: prove the scheduler can produce a useful artifact without email, model calls, or external accounts.
