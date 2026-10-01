@@ -494,7 +494,7 @@ Step 02 is complete when:
 
 - **Status:** Completed
 - **Branch:** `step-23-minimal-scheduled-job-hook`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/25
 - **Concept:** Once the process can run in the background, add a tiny generic job loop without tying it to a specific content feature.
 
 ### Objective
