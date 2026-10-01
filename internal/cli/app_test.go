@@ -561,6 +561,56 @@ func TestRunChatLogsContextTruncationWarning(t *testing.T) {
 	}
 }
 
+func TestRunServiceInstallWritesSystemdUserTemplate(t *testing.T) {
+	configHome := t.TempDir()
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "service", "install", "--config-home", configHome)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	unitPath := filepath.Join(configHome, "systemd", "user", "agent-harness@.service")
+	unit, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("expected service template at %s: %v", unitPath, err)
+	}
+	for _, want := range []string{
+		"ExecStart=%h/.local/bin/agent-harness daemon --instance %i --home %h/.local/share/agent-harness/instances/%i",
+		"WorkingDirectory=%h/.local/share/agent-harness/instances/%i",
+	} {
+		if !strings.Contains(string(unit), want) {
+			t.Fatalf("expected unit to contain %q, got:\n%s", want, string(unit))
+		}
+	}
+	for _, want := range []string{
+		"installed systemd user service template",
+		unitPath,
+		"systemctl --user daemon-reload",
+		"systemctl --user enable --now agent-harness@default.service",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got %q", want, stdout)
+		}
+	}
+}
+
+func TestRunServiceInstallRejectsUnsupportedSubcommand(t *testing.T) {
+	stdout, stderr, exitCode := runCLI("agent-harness", "service", "remove")
+
+	if exitCode == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stdout != "" {
+		t.Fatalf("expected empty stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "service error: unsupported service command") {
+		t.Fatalf("expected helpful error, got %q", stderr)
+	}
+}
+
 func TestRunInitCreatesInstanceHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "default")
 

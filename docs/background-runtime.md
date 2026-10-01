@@ -45,11 +45,25 @@ agent-harness status --instance default --json
 
 ## systemd user service
 
-Install this template as:
+Install the user-level systemd template:
+
+```bash
+agent-harness service install
+```
+
+This writes:
 
 ```text
 ~/.config/systemd/user/agent-harness@.service
 ```
+
+For tests or custom installs, pass an explicit config home:
+
+```bash
+agent-harness service install --config-home ~/.config
+```
+
+The generated template is:
 
 ```ini
 [Unit]
@@ -67,7 +81,7 @@ RestartSec=5s
 WantedBy=default.target
 ```
 
-Enable and start an instance:
+After installing the template, enable and start an instance:
 
 ```bash
 systemctl --user daemon-reload

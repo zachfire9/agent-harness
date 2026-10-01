@@ -146,6 +146,8 @@ func (a App) Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return a.runDaemon(args[2:], stdout, stderr)
 	case "init":
 		return a.runInit(args[2:], stdout, stderr)
+	case "service":
+		return a.runService(args[2:], stdout, stderr)
 	case "status":
 		return a.runStatus(args[2:], stdout, stderr)
 	case "tool":
@@ -206,6 +208,63 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func (a App) runService(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "install" {
+		fmt.Fprintln(stderr, "service error: unsupported service command")
+		return 1
+	}
+	configHome, err := parseServiceInstallOptions(args[1:])
+	if err != nil {
+		fmt.Fprintf(stderr, "service error: %v\n", err)
+		return 1
+	}
+	if configHome == "" {
+		configHome, err = defaultConfigHome()
+		if err != nil {
+			fmt.Fprintf(stderr, "service error: %v\n", err)
+			return 1
+		}
+	}
+	unitPath, err := harnessruntime.InstallSystemdUserUnit(configHome)
+	if err != nil {
+		fmt.Fprintf(stderr, "service error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "installed systemd user service template: %s\n", unitPath)
+	fmt.Fprintln(stdout, "next steps:")
+	fmt.Fprintln(stdout, "  systemctl --user daemon-reload")
+	fmt.Fprintln(stdout, "  systemctl --user enable --now agent-harness@default.service")
+	return 0
+}
+
+func parseServiceInstallOptions(args []string) (string, error) {
+	var configHome string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config-home":
+			if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
+				return "", fmt.Errorf("--config-home requires a value")
+			}
+			configHome = args[i+1]
+			i++
+		default:
+			return "", fmt.Errorf("unknown option: %s", args[i])
+		}
+	}
+	return configHome, nil
+}
+
+func defaultConfigHome() (string, error) {
+	if configHome := os.Getenv("XDG_CONFIG_HOME"); configHome != "" {
+		return configHome, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config"), nil
 }
 
 func (a App) runStatus(args []string, stdout io.Writer, stderr io.Writer) int {
