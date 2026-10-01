@@ -240,10 +240,138 @@ Step 01 is complete when:
 
 ---
 
-## Step 02 — Minimal scheduled job hook
+## Step 02 — Versioned binary build and install workflow
 
 - **Status:** Pending
-- **Branch:** `step-22-minimal-scheduled-job-hook`
+- **Branch:** `step-22-versioned-binary-install`
+- **Pull Request:** TBD
+- **Concept:** Once the runtime shell exists, package it as a versioned binary that can be installed on this host or another machine without requiring a source checkout or Go toolchain.
+
+### Objective
+
+Add a repeatable build/install workflow for compiled `agent-harness` binaries with embedded version metadata and documented update/rollback steps.
+
+This step should support both modes:
+
+1. **Development install:** build from a local checkout while iterating.
+2. **Versioned install:** install a specific release artifact on another machine.
+
+### Scope
+
+- Add build-time version metadata such as:
+  - version;
+  - commit;
+  - build date;
+  - dirty/tree state when useful.
+- Add a command such as:
+
+  ```bash
+  agent-harness version
+  ```
+
+- Include version metadata in:
+  - `agent-harness version` output;
+  - `agent-harness status --instance ...` human output;
+  - `agent-harness status --instance ... --json` output;
+  - the daemon status/health file written by Step 01.
+- Add a simple release build script before adding heavier release automation, for example:
+
+  ```bash
+  scripts/build-release.sh
+  ```
+
+- Build at least the primary Linux target first, with room for more targets later:
+
+  ```text
+  linux-amd64
+  linux-arm64
+  ```
+
+- Produce release artifacts under `dist/`, for example:
+
+  ```text
+  dist/agent-harness_<version>_linux_amd64.tar.gz
+  dist/agent-harness_<version>_linux_arm64.tar.gz
+  dist/checksums.txt
+  ```
+
+- Document manual install from a release artifact:
+
+  ```bash
+  tar -xzf agent-harness_<version>_linux_amd64.tar.gz
+  install -m 0755 agent-harness ~/.local/bin/agent-harness
+  agent-harness version
+  systemctl --user restart agent-harness@default.service
+  agent-harness status --instance default
+  ```
+
+- Document development install from source separately:
+
+  ```bash
+  git -C <repo-path> pull --ff-only
+  go test ./...
+  go build -o ~/.local/bin/agent-harness ./cmd/agent-harness
+  agent-harness version
+  systemctl --user restart agent-harness@default.service
+  agent-harness status --instance default
+  ```
+
+- Add `dist/` to `.gitignore` if needed.
+- Do not require Go to be installed on target machines that use release artifacts.
+- Do not add GitHub Actions release publishing until the manual build/install path is proven.
+
+### Files likely to change
+
+- Create: `internal/version/version.go`
+- Create: `internal/version/version_test.go`
+- Modify: `cmd/agent-harness/main.go` or CLI routing files
+- Modify: runtime/status code from Step 01 to include version metadata
+- Create: `scripts/build-release.sh`
+- Create: `docs/install-release.md`
+- Modify: `docs/background-runtime.md`
+- Modify: `.gitignore`
+- Modify: `README.md`
+
+### Tests
+
+Add deterministic tests for:
+
+- default dev version values;
+- injected version metadata formatting;
+- `agent-harness version` output;
+- JSON status includes version metadata;
+- release artifact naming avoids unsafe version strings;
+- install docs do not hardcode a particular host/user path beyond documented defaults.
+
+### Manual verification
+
+```bash
+go test ./...
+./scripts/build-release.sh 0.1.0-dev
+ls dist/
+tar -tzf dist/agent-harness_0.1.0-dev_linux_amd64.tar.gz
+install -m 0755 dist/<extracted-binary> ~/.local/bin/agent-harness
+~/.local/bin/agent-harness version
+systemctl --user restart agent-harness@default.service
+~/.local/bin/agent-harness status --instance default
+```
+
+### Acceptance criteria
+
+Step 02 is complete when:
+
+- an operator can identify exactly what version/commit is running;
+- a binary can be installed without a source checkout on the target machine;
+- status output includes version metadata;
+- update docs distinguish source-based development updates from release-artifact installs;
+- the plan leaves room for later GoReleaser/GitHub Releases automation without requiring it now.
+
+---
+
+## Step 03 — Minimal scheduled job hook
+
+- **Status:** Pending
+- **Branch:** `step-23-minimal-scheduled-job-hook`
 - **Pull Request:** TBD
 - **Concept:** Once the process can run in the background, add a tiny generic job loop without tying it to a specific content feature.
 
@@ -270,10 +398,10 @@ journalctl --user -u agent-harness@default.service -n 100 --no-pager
 
 ---
 
-## Step 03 — First useful local job TBD
+## Step 04 — First useful local job TBD
 
 - **Status:** Pending
-- **Branch:** `step-23-first-useful-local-job`
+- **Branch:** `step-24-first-useful-local-job`
 - **Pull Request:** TBD
 - **Concept:** Add the first user-visible behavior only after the background runtime and status checks are reliable.
 
