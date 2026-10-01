@@ -592,15 +592,15 @@ agent-harness version
 
 ---
 
-## Open decisions
+## Resolved Step 01 decisions
 
-Before implementing Step 01, confirm:
+Use these decisions when implementing Step 01:
 
-1. Should the first runtime manager be only `systemd --user`, or should docs also include cron/nohup as unsupported fallbacks?
-2. What should the default instance name be: `default`, `local`, or something else?
-3. Should `agent-harness status` shell out to `systemctl` when available, or only read its own status file and print the relevant `systemctl` command for the operator to run?
-4. Should Step 01 create explicit `PathResolver` and `ServiceManager` interfaces immediately, or keep them as small internal structs until the first non-Linux adapter is implemented?
-5. Should the daemon command do nothing except heartbeat in Step 01, or should it expose a tiny local health endpoint too?
+1. **Runtime manager:** Step 01 supports `systemd --user` only. Do not document cron/nohup as supported fallback runtime managers.
+2. **Default instance name:** Use `default` as the default example instance name throughout docs, tests, and generated examples.
+3. **Status behavior:** `agent-harness status` should read app-owned status files and print service-manager hints. It should not shell out to `systemctl` by default in Step 01.
+4. **Runtime abstractions:** Step 01 should create small internal path/service abstractions for testability and future OS adapters, with Linux/systemd as the only concrete service-manager implementation.
+5. **Health check:** Step 01 should use heartbeat/status files only. Do not add a local HTTP health endpoint in the MVP.
 
 ## Suggested first approved scope
 
