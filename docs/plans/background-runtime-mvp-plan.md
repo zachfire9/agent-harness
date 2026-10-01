@@ -684,7 +684,7 @@ cat ~/.local/share/agent-harness/instances/default/work/checkins.jsonl
 
 - **Status:** Completed
 - **Branch:** `step-27-delivery-adapter-spike`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/29
 - **Concept:** After local jobs are inspectable, add one narrow delivery abstraction before choosing richer content like daily briefs.
 
 ### Objective
