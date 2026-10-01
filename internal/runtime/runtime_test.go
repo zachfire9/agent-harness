@@ -1,12 +1,15 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zachfire9/agent-harness/internal/version"
 )
 
 func TestValidateInstanceNameAcceptsSafeNames(t *testing.T) {
@@ -71,7 +74,29 @@ func TestInitInstanceCreatesSelfContainedHome(t *testing.T) {
 	}
 }
 
-func TestReadRuntimeConfigParsesHeartbeatJobInterval(t *testing.T) {
+func TestInitInstanceStarterConfigIncludesEnabledHeartbeatJob(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if len(cfg.Jobs) != 1 {
+		t.Fatalf("expected one starter job, got %#v", cfg.Jobs)
+	}
+	job := cfg.Jobs[0]
+	if job.Name != "heartbeat" || job.Type != "heartbeat" || !job.Enabled || job.Interval != time.Minute {
+		t.Fatalf("unexpected starter heartbeat config: %#v", job)
+	}
+}
+
+func TestReadRuntimeConfigParsesConfiguredJobs(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
@@ -80,15 +105,77 @@ func TestReadRuntimeConfigParsesHeartbeatJobInterval(t *testing.T) {
 		t.Fatalf("init instance failed: %v", err)
 	}
 	configPath := filepath.Join(paths.ConfigDir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte("heartbeat_job_interval_seconds: 300\n"), 0o644); err != nil {
+	config := `jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 300
+  - name: slow-heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 600
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatalf("write config failed: %v", err)
 	}
 	cfg, err := ReadRuntimeConfig(paths)
 	if err != nil {
 		t.Fatalf("read runtime config failed: %v", err)
 	}
-	if cfg.HeartbeatJobInterval != 5*time.Minute {
-		t.Fatalf("expected 5 minute heartbeat interval, got %s", cfg.HeartbeatJobInterval)
+	if len(cfg.Jobs) != 2 {
+		t.Fatalf("expected two configured jobs, got %#v", cfg.Jobs)
+	}
+	if cfg.Jobs[0].Name != "heartbeat" || cfg.Jobs[0].Interval != 5*time.Minute {
+		t.Fatalf("unexpected first job: %#v", cfg.Jobs[0])
+	}
+	if cfg.Jobs[1].Name != "slow-heartbeat" || cfg.Jobs[1].Interval != 10*time.Minute {
+		t.Fatalf("unexpected second job: %#v", cfg.Jobs[1])
+	}
+}
+
+func TestReadRuntimeConfigRejectsUnknownJobType(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `jobs:
+  - name: surprise
+    type: email
+    enabled: true
+    interval_seconds: 60
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), `unknown job type "email"`) {
+		t.Fatalf("expected unknown job type error, got %v", err)
+	}
+}
+
+func TestReadRuntimeConfigRejectsInvalidJobInterval(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 0
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), `invalid interval_seconds`) {
+		t.Fatalf("expected invalid interval error, got %v", err)
 	}
 }
 
@@ -141,6 +228,105 @@ func TestHeartbeatJobStateRoundTripAndJSONShape(t *testing.T) {
 		if _, ok := heartbeat[key]; !ok {
 			t.Fatalf("expected heartbeat JSON key %q in %s", key, string(raw))
 		}
+	}
+}
+
+func TestRunConfiguredJobsSkipsDisabledJobsAndMaintainsIndependentState(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	cfg := RuntimeConfig{Jobs: []JobConfig{
+		{Name: "fast", Type: "heartbeat", Enabled: true, Interval: time.Minute},
+		{Name: "slow", Type: "heartbeat", Enabled: true, Interval: 10 * time.Minute},
+		{Name: "off", Type: "heartbeat", Enabled: false, Interval: time.Minute},
+	}}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	if err := RunConfiguredJobs(paths, cfg, now); err != nil {
+		t.Fatalf("run configured jobs failed: %v", err)
+	}
+
+	jobs, err := ReadJobs(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read jobs failed: %v", err)
+	}
+	if len(jobs.Jobs) != 2 {
+		t.Fatalf("expected only enabled jobs to run, got %#v", jobs.Jobs)
+	}
+	if _, ok := jobs.Jobs["off"]; ok {
+		t.Fatalf("disabled job should not have state: %#v", jobs.Jobs["off"])
+	}
+	if !jobs.Jobs["fast"].NextRunAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("unexpected fast next run: %#v", jobs.Jobs["fast"])
+	}
+	if !jobs.Jobs["slow"].NextRunAt.Equal(now.Add(10 * time.Minute)) {
+		t.Fatalf("unexpected slow next run: %#v", jobs.Jobs["slow"])
+	}
+}
+
+func TestRunConfiguredJobsHonorsNextRunAt(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{Name: "heartbeat", Type: "heartbeat", Enabled: true, Interval: time.Minute}}}
+	if err := RunConfiguredJobs(paths, cfg, start); err != nil {
+		t.Fatalf("first configured job run failed: %v", err)
+	}
+	beforeNextRun := start.Add(30 * time.Second)
+	if err := RunConfiguredJobs(paths, cfg, beforeNextRun); err != nil {
+		t.Fatalf("second configured job run failed: %v", err)
+	}
+	jobs, err := ReadJobs(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read jobs failed: %v", err)
+	}
+	if !jobs.Jobs["heartbeat"].LastRunAt.Equal(start) {
+		t.Fatalf("job should not rerun before next_run_at, got %#v", jobs.Jobs["heartbeat"])
+	}
+
+	afterNextRun := start.Add(90 * time.Second)
+	if err := RunConfiguredJobs(paths, cfg, afterNextRun); err != nil {
+		t.Fatalf("third configured job run failed: %v", err)
+	}
+	jobs, err = ReadJobs(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read jobs failed: %v", err)
+	}
+	if !jobs.Jobs["heartbeat"].LastRunAt.Equal(afterNextRun) {
+		t.Fatalf("job should rerun after next_run_at, got %#v", jobs.Jobs["heartbeat"])
+	}
+}
+
+func TestRunDaemonRecordsConfigErrorForInvalidJobConfig(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `jobs:
+  - name: broken
+    type: email
+    enabled: true
+    interval_seconds: 60
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	err = RunDaemon(context.Background(), paths, "default", version.Metadata{Version: "dev"}, time.Minute)
+	if err == nil || !strings.Contains(err.Error(), `unknown job type "email"`) {
+		t.Fatalf("expected daemon config error, got %v", err)
+	}
+	status, readErr := ReadStatus(paths.StatusPath)
+	if readErr != nil {
+		t.Fatalf("read status failed: %v", readErr)
+	}
+	if status.Status != StateConfigError || !strings.Contains(status.Error, `unknown job type "email"`) {
+		t.Fatalf("expected config-error status, got %#v", status)
 	}
 }
 

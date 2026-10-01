@@ -10,12 +10,13 @@ import (
 type State string
 
 const (
-	StateUnknown  State = "unknown"
-	StateStarting State = "starting"
-	StateRunning  State = "running"
-	StateStopped  State = "stopped"
-	StateStale    State = "stale"
-	StateError    State = "error"
+	StateUnknown     State = "unknown"
+	StateStarting    State = "starting"
+	StateRunning     State = "running"
+	StateStopped     State = "stopped"
+	StateStale       State = "stale"
+	StateError       State = "error"
+	StateConfigError State = "config-error"
 )
 
 // Status is the app-owned health/status document stored in an instance home.

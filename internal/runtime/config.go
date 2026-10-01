@@ -12,12 +12,24 @@ import (
 
 const defaultHeartbeatJobInterval = time.Minute
 
+type JobConfig struct {
+	Name     string
+	Type     string
+	Enabled  bool
+	Interval time.Duration
+}
+
 type RuntimeConfig struct {
-	HeartbeatJobInterval time.Duration
+	Jobs []JobConfig
 }
 
 func DefaultRuntimeConfig() RuntimeConfig {
-	return RuntimeConfig{HeartbeatJobInterval: defaultHeartbeatJobInterval}
+	return RuntimeConfig{Jobs: []JobConfig{{
+		Name:     "heartbeat",
+		Type:     "heartbeat",
+		Enabled:  true,
+		Interval: defaultHeartbeatJobInterval,
+	}}}
 }
 
 func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
@@ -32,27 +44,118 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	}
 	defer file.Close()
 
+	parsed, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	if sawJobs {
+		cfg.Jobs = parsed
+	} else if legacyInterval > 0 {
+		cfg.Jobs[0].Interval = legacyInterval
+	}
+	if err := validateRuntimeConfig(cfg); err != nil {
+		return RuntimeConfig{}, err
+	}
+	return cfg, nil
+}
+
+func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error) {
+	var jobs []JobConfig
+	var current *JobConfig
+	var sawJobs bool
+	var legacyInterval time.Duration
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		raw := scanner.Text()
+		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+		if line == "jobs:" {
+			sawJobs = true
+			continue
+		}
+		if strings.HasPrefix(line, "- ") {
+			if current != nil {
+				jobs = append(jobs, *current)
+			}
+			current = &JobConfig{Enabled: true, Interval: defaultHeartbeatJobInterval}
+			line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
+			if line == "" {
+				continue
+			}
 		}
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(key) != "heartbeat_job_interval_seconds" {
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+
+		if !sawJobs && key == "heartbeat_job_interval_seconds" {
+			seconds, err := parsePositiveSeconds(value, "heartbeat_job_interval_seconds")
+			if err != nil {
+				return nil, false, 0, err
+			}
+			legacyInterval = seconds
 			continue
 		}
-		seconds, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil || seconds <= 0 {
-			return RuntimeConfig{}, fmt.Errorf("invalid heartbeat_job_interval_seconds %q", strings.TrimSpace(value))
+		if !sawJobs || current == nil {
+			continue
 		}
-		cfg.HeartbeatJobInterval = time.Duration(seconds) * time.Second
+		switch key {
+		case "name":
+			current.Name = value
+		case "type":
+			current.Type = value
+		case "enabled":
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return nil, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
+			}
+			current.Enabled = enabled
+		case "interval_seconds":
+			interval, err := parsePositiveSeconds(value, "interval_seconds")
+			if err != nil {
+				return nil, true, 0, err
+			}
+			current.Interval = interval
+		}
 	}
 	if err := scanner.Err(); err != nil {
-		return RuntimeConfig{}, err
+		return nil, sawJobs, legacyInterval, err
 	}
-	return cfg, nil
+	if current != nil {
+		jobs = append(jobs, *current)
+	}
+	return jobs, sawJobs, legacyInterval, nil
+}
+
+func parsePositiveSeconds(value, field string) (time.Duration, error) {
+	seconds, err := strconv.Atoi(value)
+	if err != nil || seconds <= 0 {
+		return 0, fmt.Errorf("invalid %s %q", field, value)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func validateRuntimeConfig(cfg RuntimeConfig) error {
+	seen := map[string]bool{}
+	for i, job := range cfg.Jobs {
+		if strings.TrimSpace(job.Name) == "" {
+			return fmt.Errorf("job %d missing name", i)
+		}
+		if seen[job.Name] {
+			return fmt.Errorf("duplicate job name %q", job.Name)
+		}
+		seen[job.Name] = true
+		if job.Type != "heartbeat" {
+			return fmt.Errorf("unknown job type %q for job %q", job.Type, job.Name)
+		}
+		if job.Interval <= 0 {
+			return fmt.Errorf("invalid interval_seconds for job %q", job.Name)
+		}
+	}
+	return nil
 }

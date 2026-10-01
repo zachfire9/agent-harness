@@ -522,7 +522,7 @@ journalctl --user -u agent-harness@default.service -n 100 --no-pager
 
 ## Step 04 — Configurable job registry and schedules
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-24-configurable-job-registry`
 - **Pull Request:** TBD
 - **Concept:** Turn the first hardcoded heartbeat hook into a small reusable job system where enabled jobs, intervals, and job types are declared in config rather than baked into the daemon.

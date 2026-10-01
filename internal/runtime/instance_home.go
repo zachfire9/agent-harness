@@ -6,8 +6,12 @@ import (
 )
 
 const starterConfig = `# agent-harness instance configuration
-# Built-in heartbeat job interval. Later steps can add more job types here.
-heartbeat_job_interval_seconds: 60
+# Jobs are declared here and recorded under state/jobs.json.
+jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
 `
 
 // InitInstance creates the self-contained directory tree for an instance.
