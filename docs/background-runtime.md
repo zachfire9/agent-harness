@@ -91,6 +91,25 @@ jobs:
 
 Each JSONL record includes the job name, timestamp, message, and success status. Job status points to the output file path but does not dump the file contents.
 
+### Notification test jobs and file outbox delivery
+
+The `notify_test` job type exercises the first delivery adapter without adding email, Telegram, Google, model calls, or daily-brief content. It sends a configured message through a small notifier interface. The only built-in notifier for now is a local file outbox under the instance home.
+
+Example:
+```yaml
+jobs:
+  - name: notify-test
+    type: notify_test
+    enabled: true
+    interval_seconds: 3600
+    message: "delivery adapter works"
+    outbox_path: "work/outbox.jsonl"
+```
+
+`message` defaults to `agent-harness notification test` when omitted. `outbox_path` defaults to `work/outbox.jsonl` and must be a relative path that stays inside the instance home.
+
+Each outbox JSONL record includes the job name, timestamp, message, and `transport: "file_outbox"`. Job status points to the outbox path but does not dump message contents into `jobs list` output. Delivery failures are recorded in `state/jobs.json` as failed job state with `last_error`.
+
 ## Inspect and manually run jobs
 
 List configured jobs without needing a long-running daemon:
@@ -107,6 +126,7 @@ Run a configured job immediately through the same registry used by the daemon:
 ```bash
 agent-harness jobs run heartbeat --instance default
 agent-harness jobs run daily-checkin --instance default
+agent-harness jobs run notify-test --instance default
 ```
 
 Manual runs update `state/jobs.json` just like scheduled daemon runs. Unknown jobs, disabled jobs, and invalid job config return controlled non-zero errors. The command does not require `systemd` or a background daemon, which makes it useful for debugging instance config before enabling the service.

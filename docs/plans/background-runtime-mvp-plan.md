@@ -682,9 +682,9 @@ cat ~/.local/share/agent-harness/instances/default/work/checkins.jsonl
 
 ## Step 07 — Delivery adapter spike for the first external notification
 
-- **Status:** Pending
+- **Status:** Completed
 - **Branch:** `step-27-delivery-adapter-spike`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/29
 - **Concept:** After local jobs are inspectable, add one narrow delivery abstraction before choosing richer content like daily briefs.
 
 ### Objective
@@ -701,11 +701,9 @@ Create a minimal delivery interface and one configured delivery implementation, 
   }
   ```
 
-- Start with one low-risk delivery mode chosen at implementation time, such as:
-  - local file outbox under the instance home; or
-  - SMTP/email if credentials and target address are explicitly configured.
-- If SMTP/email is selected, keep credentials in the instance config/env file and redact them from status, logs, traces, and test failures.
-- Add a `notify_test` job or manual command that sends a configured test message through the adapter.
+- Start with one low-risk delivery mode: a local file outbox under the instance home.
+- Add a `notify_test` job that sends a configured test message through the adapter.
+- Do not add SMTP/email credentials in this step; no secrets are required for file-outbox delivery.
 - Do not add daily brief content, Google Docs ingestion, or LLM generation in this step.
 
 ### Tests
@@ -713,9 +711,9 @@ Create a minimal delivery interface and one configured delivery implementation, 
 Add deterministic tests for:
 
 - notifier config validation;
-- file outbox or fake SMTP delivery path;
+- file outbox delivery path;
 - delivery errors are recorded in job state;
-- secrets are redacted from logs/status/errors;
+- message contents are not dumped into `jobs list` output;
 - jobs can depend on the notifier interface without knowing the concrete delivery transport.
 
 ### Verification
@@ -725,6 +723,234 @@ go test ./...
 agent-harness jobs run notify-test --instance default
 agent-harness jobs list --instance default
 ```
+
+---
+
+## Step 08 — Google OAuth account connection and secret-safe status
+
+- **Status:** Planned
+- **Branch:** `step-28-google-oauth-connection`
+- **Pull Request:** TBD
+- **Concept:** Before adding Gmail or Google Docs behavior, give each instance a secure, inspectable way to connect a Google account with minimum necessary OAuth scopes and without leaking tokens into config, status, logs, docs, or PRs.
+
+### Objective
+
+Add the Google account/auth foundation that future Google-backed jobs can reuse: configured OAuth client metadata, token storage under the instance home, connection/status commands, revoke/delete support, and secret-safe diagnostics.
+
+### Scope
+
+- Add Google OAuth config under `config/config.yaml` using paths/metadata only, not inline secrets, conceptually:
+
+  ```yaml
+  google:
+    client_credentials_path: "config/secrets/google-client.json"
+    token_path: "config/secrets/google-token.json"
+    account_hint: "agent@example.com"
+    scope_profile: "gmail_send"
+  ```
+
+- Create a restricted instance-owned secrets directory, for example `config/secrets/`, with documented `0600` file permissions for credentials/tokens.
+- Add Google auth/status/revoke commands, conceptually:
+
+  ```bash
+  agent-harness google auth start --instance default
+  agent-harness google auth status --instance default
+  agent-harness google auth revoke --instance default
+  ```
+
+- Keep allowed scope profiles explicit and narrow. Initial profiles should match near-term planned behavior, for example:
+  - `gmail_send`: Gmail send-only scope for a future notifier;
+  - `docs_readonly`: Google Docs read-only scope for a future document source adapter.
+- Do not request broad Drive/Gmail scopes unless a later step proves they are necessary.
+- Do not add Gmail sending, Docs ingestion, scheduled jobs, daily-brief content, or model calls in this step.
+- Status output may show safe metadata such as connected/disconnected, account email, configured scope profile, token expiry, and token file path. It must not print access tokens, refresh tokens, client secrets, authorization codes, or raw credential JSON.
+- Add a revoke/delete path that removes local token material and documents how to revoke app access in the Google account UI.
+
+### Tests
+
+Add deterministic tests for:
+
+- Google config validation accepts configured paths and known scope profiles;
+- unknown scope profiles fail with `config-error` or controlled CLI errors;
+- secret paths are constrained to the instance home unless explicitly allowed later;
+- token/client-secret values are redacted from status, errors, and logs;
+- revoke/delete removes the local token file without touching unrelated config;
+- commands are testable with a fake OAuth/token client and do not require live Google in unit tests.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness google auth status --instance default
+agent-harness google auth revoke --instance default --confirm revoke-google-token
+```
+
+For live manual OAuth verification, use a throwaway/test Google account or the dedicated agent account and document the exact scopes requested before approving the consent screen.
+
+---
+
+## Step 09 — Gmail notifier delivery adapter
+
+- **Status:** Planned
+- **Branch:** `step-29-gmail-notifier`
+- **Pull Request:** TBD
+- **Concept:** Once Google auth is observable and revocable, add the first real network notifier by adapting the existing delivery interface to Gmail send-only delivery.
+
+### Objective
+
+Add a Gmail-backed notifier that can send a configured test notification through the same `Notifier` interface introduced in Step 07, using the Step 08 token handling and the narrow Gmail send scope.
+
+### Scope
+
+- Add a notifier config option, conceptually:
+
+  ```yaml
+  notifier:
+    type: gmail
+    gmail:
+      from: "agent@example.com"
+      to:
+        - "operator@example.com"
+      subject_prefix: "[agent-harness]"
+  ```
+
+- Reuse the existing `notify_test` job as the first Gmail smoke test instead of adding daily-brief content.
+- Require the `gmail_send` scope profile and fail clearly if the connected token does not have the required scope.
+- Keep file outbox available as the safe local notifier for tests and non-Google installs.
+- Keep message bodies compact and avoid logging full delivered content by default.
+- Do not add inbound Gmail reading, Docs ingestion, daily-brief sections, model calls, or Telegram delivery in this step.
+
+### Tests
+
+Add deterministic tests for:
+
+- Gmail notifier config validation;
+- missing/expired token returns a controlled delivery error;
+- required Gmail send scope is enforced;
+- Gmail API calls are made through a fake client in unit tests;
+- job failure state records safe error metadata without credentials or full message body;
+- file outbox notifier still works after adding Gmail support.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness google auth status --instance default
+agent-harness jobs run notify-test --instance default
+agent-harness jobs list --instance default
+```
+
+Live verification should send one test email to a configured operator address, then confirm the job state records success without exposing OAuth tokens or raw API responses.
+
+---
+
+## Step 10 — Google Docs read-only source adapter
+
+- **Status:** Planned
+- **Branch:** `step-30-google-docs-source`
+- **Pull Request:** TBD
+- **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.
+
+### Objective
+
+Read a configured Google Doc using a minimum-scope Google token and expose the retrieved text through a small source interface and debug command, without yet turning it into a scheduled content product.
+
+### Scope
+
+- Add a Google Docs source config, conceptually:
+
+  ```yaml
+  sources:
+    google_docs:
+      vocabulary_doc_id: "placeholder-doc-id"
+  ```
+
+- Require the `docs_readonly` scope profile or a later explicit combined profile if Gmail and Docs must share one token.
+- Add a debug/read command that fetches safe metadata and text from a configured document, conceptually:
+
+  ```bash
+  agent-harness google docs read vocabulary_doc_id --instance default
+  ```
+
+- Keep document IDs configurable and placeholder-only in committed examples.
+- Avoid storing full document content in status files or job state. If caching is added, store it under `cache/` with explicit docs and no credentials.
+- Do not add model summaries, daily brief rendering, or schedule-driven Docs jobs in this step.
+
+### Tests
+
+Add deterministic tests for:
+
+- Docs source config validation;
+- missing/unknown document aliases fail clearly;
+- required read-only scope is enforced;
+- fake Docs client returns document text for parser/source tests;
+- status/job output never dumps full document content;
+- document IDs and API errors are handled without exposing tokens or credential JSON.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness google auth status --instance default
+agent-harness google docs read vocabulary_doc_id --instance default
+```
+
+Live verification should use a test/shared document with non-sensitive content first.
+
+---
+
+## Step 11 — First Google-backed scheduled digest job
+
+- **Status:** Planned
+- **Branch:** `step-31-google-doc-digest-job`
+- **Pull Request:** TBD
+- **Concept:** Combine the scheduler, Google Docs source adapter, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
+
+### Objective
+
+Add a narrow scheduled job that reads one configured Google Doc, renders a deterministic short message, and sends it through the configured notifier.
+
+### Scope
+
+- Add a job type such as `google_doc_digest`, conceptually:
+
+  ```yaml
+  jobs:
+    - name: vocabulary-digest
+      type: google_doc_digest
+      enabled: true
+      interval_seconds: 86400
+      source: vocabulary_doc_id
+      notifier: default
+      max_items: 1
+  ```
+
+- Keep rendering deterministic and templated. Do not call an LLM in this step.
+- Use one configured source and a small bounded output so delivery can be verified safely.
+- Record normal job metadata in `state/jobs.json` but do not store full document content or full delivered message there.
+- Keep this separate from a full daily brief. Additional sections, rotations, enrichment, model polish, and multiple source documents should be later steps.
+
+### Tests
+
+Add deterministic tests for:
+
+- configured Google Doc digest job reads through the source interface;
+- digest rendering is bounded and deterministic;
+- notifier receives the expected compact message through a fake notifier;
+- source/notifier failures are recorded as failed job state with secret-safe errors;
+- disabled digest jobs do not fetch Docs or send notifications;
+- no model calls are made.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness jobs run vocabulary-digest --instance default
+agent-harness jobs list --instance default
+agent-harness status --instance default --json
+```
+
+Live verification should start with manual `jobs run` before enabling the digest on an unattended interval.
 
 ---
 
@@ -799,15 +1025,15 @@ Use these decisions when implementing Step 01:
 4. **Runtime abstractions:** Step 01 should create small internal path/service abstractions for testability and future OS adapters, with Linux/systemd as the only concrete service-manager implementation.
 5. **Health check:** Step 01 should use heartbeat/status files only. Do not add a local HTTP health endpoint in the MVP.
 
-## Suggested next scope after Step 03
+## Suggested next scope after Step 07
 
-After Step 03, continue with the job system in thin slices instead of jumping straight to email, Google Docs, Telegram, AWS, model calls, or daily-brief content:
+After Step 07, continue with Google integration in thin, security-first slices instead of jumping straight to a full daily brief, broad account access, Telegram, AWS, or model calls:
 
 ```text
-Step 04 — Configurable job registry and schedules
-Step 05 — Job inspection and manual run commands
-Step 06 — First useful local job: append a timestamped check-in file
-Step 07 — Delivery adapter spike for the first external notification
+Step 08 — Google OAuth account connection and secret-safe status
+Step 09 — Gmail notifier delivery adapter
+Step 10 — Google Docs read-only source adapter
+Step 11 — First Google-backed scheduled digest job
 ```
 
-That keeps the next PRs focused on reusable scheduling plumbing and local verification before adding external integrations or richer content.
+That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, and deterministic source/digest behavior before adding richer content, rotations, enrichment, or model polish.

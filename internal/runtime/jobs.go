@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -63,6 +64,16 @@ func WriteJobs(path string, jobs JobsState) error {
 
 type Job interface {
 	Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error)
+}
+
+type Message struct {
+	Job       string
+	Body      string
+	Timestamp time.Time
+}
+
+type Notifier interface {
+	Send(ctx context.Context, message Message) error
 }
 
 type heartbeatJob struct{}
@@ -146,8 +157,88 @@ func localCheckinOutputPath(cfg JobConfig) string {
 	return filepath.ToSlash(filepath.Clean(cfg.OutputPath))
 }
 
+type notifyTestJob struct{}
+
+func (notifyTestJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
+	return runNotifyTestWithNotifier(paths, now, cfg, fileOutboxNotifier{paths: paths, outboxPath: notifyTestOutboxPath(cfg)})
+}
+
+func runNotifyTestWithNotifier(paths Paths, now time.Time, cfg JobConfig, notifier Notifier) (JobState, error) {
+	message := Message{Job: cfg.Name, Body: notifyTestMessage(cfg), Timestamp: now.UTC()}
+	if err := notifier.Send(context.Background(), message); err != nil {
+		return JobState{OutputPath: notifyTestOutboxPath(cfg)}, err
+	}
+	return JobState{
+		Name:          cfg.Name,
+		Type:          cfg.Type,
+		Status:        JobSucceeded,
+		LastRunAt:     now.UTC(),
+		LastSuccessAt: now.UTC(),
+		LastError:     "",
+		NextRunAt:     now.Add(cfg.Interval).UTC(),
+		OutputPath:    notifyTestOutboxPath(cfg),
+	}, nil
+}
+
+func notifyTestMessage(cfg JobConfig) string {
+	if strings.TrimSpace(cfg.Message) == "" {
+		return "agent-harness notification test"
+	}
+	return cfg.Message
+}
+
+func notifyTestOutboxPath(cfg JobConfig) string {
+	if strings.TrimSpace(cfg.OutboxPath) == "" {
+		return "work/outbox.jsonl"
+	}
+	return filepath.ToSlash(filepath.Clean(cfg.OutboxPath))
+}
+
+type fileOutboxNotifier struct {
+	paths      Paths
+	outboxPath string
+}
+
+type fileOutboxRecord struct {
+	Job       string `json:"job"`
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+	Transport string `json:"transport"`
+}
+
+func (n fileOutboxNotifier) Send(ctx context.Context, message Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateInstanceRelativePath(n.outboxPath); err != nil {
+		return err
+	}
+	record := fileOutboxRecord{
+		Job:       message.Job,
+		Timestamp: message.Timestamp.UTC().Format(time.RFC3339),
+		Message:   message.Body,
+		Transport: "file_outbox",
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	absPath := filepath.Join(n.paths.Home, filepath.FromSlash(n.outboxPath))
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(absPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Write(data)
+	return err
+}
+
 func defaultJobRegistry() map[string]Job {
-	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}}
+	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}, "notify_test": notifyTestJob{}}
 }
 
 func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
@@ -262,8 +353,11 @@ func failedJobState(jobCfg JobConfig, now time.Time, err error) JobState {
 		LastError: err.Error(),
 		NextRunAt: now.Add(interval).UTC(),
 	}
-	if jobCfg.Type == "local_checkin" {
+	if jobCfg.Type == "local_checkin" || jobCfg.Type == "notify_test" {
 		state.OutputPath = localCheckinOutputPath(jobCfg)
+		if jobCfg.Type == "notify_test" {
+			state.OutputPath = notifyTestOutboxPath(jobCfg)
+		}
 	}
 	return state
 }
