@@ -18,7 +18,6 @@ The first useful deliverable is **not** a daily brief or birthday email. The fir
 Do not include these in the first step:
 
 - daily brief content;
-- birthday countdown content;
 - Gmail/Google Docs integration;
 - Telegram delivery;
 - AWS/remote deployment;
