@@ -368,6 +368,7 @@ type jobListItem struct {
 	LastSuccessAt string `json:"last_success_at,omitempty"`
 	NextRunAt     string `json:"next_run_at,omitempty"`
 	LastError     string `json:"last_error,omitempty"`
+	OutputPath    string `json:"output_path,omitempty"`
 }
 
 func loadJobsCommandState(opts runtimeOptions, stderr io.Writer) (harnessruntime.Paths, harnessruntime.RuntimeConfig, harnessruntime.JobsState, bool) {
@@ -402,6 +403,7 @@ func buildJobListItems(cfg harnessruntime.RuntimeConfig, jobs harnessruntime.Job
 			item.LastSuccessAt = formatJobTime(state.LastSuccessAt)
 			item.NextRunAt = formatJobTime(state.NextRunAt)
 			item.LastError = state.LastError
+			item.OutputPath = state.OutputPath
 		}
 		items = append(items, item)
 	}
@@ -429,6 +431,9 @@ func writeHumanJobsList(stdout io.Writer, items []jobListItem, paths harnessrunt
 		}
 		if item.LastError != "" {
 			fmt.Fprintf(stdout, "  last_error: %s\n", item.LastError)
+		}
+		if item.OutputPath != "" {
+			fmt.Fprintf(stdout, "  output_path: %s\n", item.OutputPath)
 		}
 	}
 	fmt.Fprintf(stdout, "jobs_file: %s\n", paths.JobsPath)

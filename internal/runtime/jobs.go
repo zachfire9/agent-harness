@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type JobState struct {
 	LastSuccessAt time.Time `json:"last_success_at"`
 	LastError     string    `json:"last_error"`
 	NextRunAt     time.Time `json:"next_run_at"`
+	OutputPath    string    `json:"output_path,omitempty"`
 }
 
 type JobsState struct {
@@ -60,12 +62,12 @@ func WriteJobs(path string, jobs JobsState) error {
 }
 
 type Job interface {
-	Run(now time.Time, cfg JobConfig) (JobState, error)
+	Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error)
 }
 
 type heartbeatJob struct{}
 
-func (heartbeatJob) Run(now time.Time, cfg JobConfig) (JobState, error) {
+func (heartbeatJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
 	interval := cfg.Interval
 	if interval <= 0 {
 		interval = defaultHeartbeatJobInterval
@@ -81,8 +83,71 @@ func (heartbeatJob) Run(now time.Time, cfg JobConfig) (JobState, error) {
 	}, nil
 }
 
+type localCheckinJob struct{}
+
+type localCheckinRecord struct {
+	Job       string `json:"job"`
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+	Status    string `json:"status"`
+}
+
+func (localCheckinJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
+	outputPath := localCheckinOutputPath(cfg)
+	if err := validateInstanceRelativePath(outputPath); err != nil {
+		return JobState{OutputPath: outputPath}, err
+	}
+	record := localCheckinRecord{
+		Job:       cfg.Name,
+		Timestamp: now.UTC().Format(time.RFC3339),
+		Message:   localCheckinMessage(cfg),
+		Status:    string(JobSucceeded),
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		return JobState{}, err
+	}
+	data = append(data, '\n')
+	absPath := filepath.Join(paths.Home, filepath.FromSlash(outputPath))
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		return JobState{OutputPath: outputPath}, err
+	}
+	file, err := os.OpenFile(absPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return JobState{OutputPath: outputPath}, err
+	}
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		return JobState{OutputPath: outputPath}, err
+	}
+	return JobState{
+		Name:          cfg.Name,
+		Type:          cfg.Type,
+		Status:        JobSucceeded,
+		LastRunAt:     now.UTC(),
+		LastSuccessAt: now.UTC(),
+		LastError:     "",
+		NextRunAt:     now.Add(cfg.Interval).UTC(),
+		OutputPath:    outputPath,
+	}, nil
+}
+
+func localCheckinMessage(cfg JobConfig) string {
+	if strings.TrimSpace(cfg.Message) == "" {
+		return "agent-harness is alive"
+	}
+	return cfg.Message
+}
+
+func localCheckinOutputPath(cfg JobConfig) string {
+	if strings.TrimSpace(cfg.OutputPath) == "" {
+		return "work/checkins.jsonl"
+	}
+	return filepath.ToSlash(filepath.Clean(cfg.OutputPath))
+}
+
 func defaultJobRegistry() map[string]Job {
-	return map[string]Job{"heartbeat": heartbeatJob{}}
+	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}}
 }
 
 func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
@@ -99,7 +164,7 @@ func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
 		if hasPrevious && previous.NextRunAt.After(now) {
 			continue
 		}
-		if _, err := runConfiguredJobWithState(jobsState, jobCfg, now, registry); err != nil {
+		if _, err := runConfiguredJobWithState(paths, jobsState, jobCfg, now, registry); err != nil {
 			if writeErr := WriteJobs(paths.JobsPath, jobsState); writeErr != nil {
 				return writeErr
 			}
@@ -125,7 +190,7 @@ func runConfiguredJobNowWithRegistry(paths Paths, cfg RuntimeConfig, name string
 	if err != nil {
 		return JobState{}, err
 	}
-	state, runErr := runConfiguredJobWithState(jobsState, jobCfg, now, registry)
+	state, runErr := runConfiguredJobWithState(paths, jobsState, jobCfg, now, registry)
 	if err := WriteJobs(paths.JobsPath, jobsState); err != nil {
 		return JobState{}, err
 	}
@@ -141,16 +206,20 @@ func findJobConfig(cfg RuntimeConfig, name string) (JobConfig, bool) {
 	return JobConfig{}, false
 }
 
-func runConfiguredJobWithState(jobsState JobsState, jobCfg JobConfig, now time.Time, registry map[string]Job) (JobState, error) {
+func runConfiguredJobWithState(paths Paths, jobsState JobsState, jobCfg JobConfig, now time.Time, registry map[string]Job) (JobState, error) {
 	job, ok := registry[jobCfg.Type]
 	if !ok {
 		state := failedJobState(jobCfg, now, fmt.Errorf("unknown job type %q", jobCfg.Type))
 		jobsState.Jobs[jobCfg.Name] = state
 		return state, fmt.Errorf("unknown job type %q", jobCfg.Type)
 	}
-	state, err := job.Run(now, jobCfg)
+	state, err := job.Run(paths, now, jobCfg)
 	if err != nil {
-		state = failedJobState(jobCfg, now, err)
+		failed := failedJobState(jobCfg, now, err)
+		if state.OutputPath != "" {
+			failed.OutputPath = state.OutputPath
+		}
+		state = failed
 	} else {
 		state = normalizeJobState(state, jobCfg, now)
 	}
@@ -185,7 +254,7 @@ func failedJobState(jobCfg JobConfig, now time.Time, err error) JobState {
 	if interval <= 0 {
 		interval = defaultHeartbeatJobInterval
 	}
-	return JobState{
+	state := JobState{
 		Name:      jobCfg.Name,
 		Type:      jobCfg.Type,
 		Status:    JobFailed,
@@ -193,6 +262,10 @@ func failedJobState(jobCfg JobConfig, now time.Time, err error) JobState {
 		LastError: err.Error(),
 		NextRunAt: now.Add(interval).UTC(),
 	}
+	if jobCfg.Type == "local_checkin" {
+		state.OutputPath = localCheckinOutputPath(jobCfg)
+	}
+	return state
 }
 
 func readJobsStateOrEmpty(path string) (JobsState, error) {

@@ -932,6 +932,51 @@ func TestRunJobsRunHeartbeatUpdatesJobState(t *testing.T) {
 	}
 }
 
+func TestRunJobsRunLocalCheckinWritesFileAndShowsOutputPath(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `jobs:
+  - name: daily-checkin
+    type: local_checkin
+    enabled: true
+    interval_seconds: 60
+    message: "agent-harness is alive"
+    output_path: "work/checkins.jsonl"
+`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "jobs", "run", "daily-checkin", "--instance", "default", "--home", home)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("expected empty stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "ran job daily-checkin: succeeded") {
+		t.Fatalf("expected run confirmation, got %q", stdout)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "work", "checkins.jsonl"))
+	if err != nil {
+		t.Fatalf("expected checkins file: %v", err)
+	}
+	if !strings.Contains(string(raw), `"job":"daily-checkin"`) || !strings.Contains(string(raw), `"message":"agent-harness is alive"`) {
+		t.Fatalf("expected checkin record, got %s", string(raw))
+	}
+
+	stdout, stderr, exitCode = runCLI("agent-harness", "jobs", "list", "--instance", "default", "--home", home)
+	if exitCode != 0 {
+		t.Fatalf("expected list exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stdout, "output_path: work/checkins.jsonl") {
+		t.Fatalf("expected output path in jobs list without file contents, got %q", stdout)
+	}
+	if strings.Contains(stdout, "agent-harness is alive") {
+		t.Fatalf("jobs list should not dump checkin file contents, got %q", stdout)
+	}
+}
+
 func TestRunJobsRunRejectsUnknownAndDisabledJobs(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "default")
 	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
