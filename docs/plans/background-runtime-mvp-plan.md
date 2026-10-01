@@ -4,14 +4,14 @@
 
 ## Goal
 
-Build a generic background runtime for `agent-harness` that can initially run on the same Linux machine Alf is running on, while remaining reusable for other `agent-harness` instances on other machines.
+Build a generic background runtime for `agent-harness` that can initially run on a local Linux host, while remaining reusable for other `agent-harness` instances on other machines.
 
 The first useful deliverable is **not** a daily brief or birthday email. The first deliverable is:
 
 - `agent-harness` can run unattended in the background;
 - it has a stable instance name/config/state/log layout;
-- Alf can check whether it is running, stopped, failing, or misconfigured;
-- the same mechanism can be installed for another instance without hardcoding this machine.
+- an operator can check whether it is running, stopped, failing, or misconfigured;
+- the same mechanism can be installed for another instance without hardcoding a specific machine.
 
 ## Non-goals for the MVP
 
@@ -31,16 +31,16 @@ Those can be added after the background runtime is reliable.
 
 Initial target:
 
-- Linux machine where Alf is currently running.
+- Local Linux host used for the first deployment.
 - User-level service preferred over root/system service.
 - `systemd --user` is the first runtime manager.
 
 Generic design requirement:
 
-- Nothing should be hardcoded to Alf's current username, repo checkout, home directory, or machine name.
+- Nothing should be hardcoded to a specific username, repo checkout, home directory, or machine name.
 - Runtime paths should be derived from config, flags, or XDG-style defaults.
 - Every service should have an explicit instance name, for example `default`, `daily-brief`, or `birthday-countdown`.
-- Status checks should work the same way for this machine and future instances.
+- Status checks should work the same way for the first host and future instances.
 
 Recommended default paths:
 
@@ -67,7 +67,7 @@ If the implementation uses different paths, document why and keep them instance-
 
 ### Objective
 
-Update `agent-harness` so it can run as a background process under a generic instance name and expose clear status/error checks that Alf can run on this machine and reuse for other instances later.
+Update `agent-harness` so it can run as a background process under a generic instance name and expose clear status/error checks that an operator can run on any supported host and reuse for other instances later.
 
 ### Scope
 
@@ -180,9 +180,9 @@ Add deterministic unit tests for:
 
 Do not require real `systemd` in unit tests. Test unit rendering and status classification with fakes.
 
-### Manual verification on Alf's current machine
+### Manual verification on the first local host
 
-After Step 01 is implemented, Alf should be able to run:
+After Step 01 is implemented, an operator should be able to run:
 
 ```bash
 go test ./...
@@ -208,7 +208,7 @@ Expected result:
 
 ### Update workflow for future changes
 
-Document a generic update path that Alf can run for this instance and adapt for others:
+Document a generic update path that an operator can run for this instance and adapt for others:
 
 ```bash
 git -C <repo-path> pull --ff-only
@@ -232,10 +232,10 @@ The docs should explain which placeholders change for another machine or instanc
 
 Step 01 is complete when:
 
-- the background daemon can be started by a user-level service on this machine;
+- the background daemon can be started by a user-level service on a local Linux host;
 - the same service template can run another named instance;
-- Alf can check status with one `agent-harness status --instance ...` command;
-- Alf can inspect logs with one documented `journalctl` command;
+- an operator can check status with one `agent-harness status --instance ...` command;
+- an operator can inspect logs with one documented `journalctl` command;
 - failed startup/config errors are visible without reading source code;
 - all new behavior has tests or documented manual verification where true background process behavior is involved.
 
@@ -296,8 +296,8 @@ Do not decide this in Step 01. Step 01 should stay focused on the runtime shell.
 Before implementing Step 01, confirm:
 
 1. Should the first runtime manager be only `systemd --user`, or should docs also include cron/nohup as unsupported fallbacks?
-2. What should the default instance name be: `default`, `alf`, or something else?
-3. Should `agent-harness status` shell out to `systemctl` when available, or only read its own status file and tell Alf which `systemctl` command to run?
+2. What should the default instance name be: `default`, `local`, or something else?
+3. Should `agent-harness status` shell out to `systemctl` when available, or only read its own status file and print the relevant `systemctl` command for the operator to run?
 4. Should the daemon command do nothing except heartbeat in Step 01, or should it expose a tiny local health endpoint too?
 
 ## Suggested first approved scope
