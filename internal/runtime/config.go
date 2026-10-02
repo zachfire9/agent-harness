@@ -13,7 +13,7 @@ import (
 const defaultHeartbeatJobInterval = time.Minute
 
 type LLMConfig struct {
-	Name      string
+	Profile   string
 	Provider  string
 	Model     string
 	APIKeyEnv string
@@ -21,32 +21,51 @@ type LLMConfig struct {
 }
 
 func (c LLMConfig) IsZero() bool {
-	return strings.TrimSpace(c.Name) == "" && strings.TrimSpace(c.Provider) == "" && strings.TrimSpace(c.Model) == "" && strings.TrimSpace(c.APIKeyEnv) == "" && strings.TrimSpace(c.BaseURL) == ""
+	return strings.TrimSpace(c.Profile) == "" && strings.TrimSpace(c.Provider) == "" && strings.TrimSpace(c.Model) == "" && strings.TrimSpace(c.APIKeyEnv) == "" && strings.TrimSpace(c.BaseURL) == ""
+}
+
+type LLMSelector struct {
+	Profile  string
+	Provider string
+	Model    string
+}
+
+func (s LLMSelector) IsZero() bool {
+	return strings.TrimSpace(s.Profile) == "" && strings.TrimSpace(s.Provider) == "" && strings.TrimSpace(s.Model) == ""
+}
+
+type LLMProviderConfig struct {
+	Profile   string
+	Provider  string
+	APIKeyEnv string
+	BaseURL   string
+	Models    []string
 }
 
 type LLMRegistryConfig struct {
-	Default  string
-	Profiles map[string]LLMConfig
+	Default    LLMSelector
+	Providers  map[string]LLMProviderConfig
+	Duplicates []string
 }
 
 func (c LLMRegistryConfig) IsZero() bool {
-	return strings.TrimSpace(c.Default) == "" && len(c.Profiles) == 0
+	return c.Default.IsZero() && len(c.Providers) == 0
 }
 
 type JobConfig struct {
-	Name       string
-	Type       string
-	Enabled    bool
-	Interval   time.Duration
-	Message    string
-	Prompt     string
-	MaxChars   int
-	OutputPath string
-	OutboxPath string
-	Notifier   NotifierConfig
-	Google     GoogleConfig
-	LLMProfile string
-	LLM        LLMConfig
+	Name        string
+	Type        string
+	Enabled     bool
+	Interval    time.Duration
+	Message     string
+	Prompt      string
+	MaxChars    int
+	OutputPath  string
+	OutboxPath  string
+	Notifier    NotifierConfig
+	Google      GoogleConfig
+	LLMOverride LLMSelector
+	LLM         LLMConfig
 }
 
 func (job JobConfig) ResolvedLLM() LLMConfig {
@@ -115,16 +134,44 @@ func (cfg *RuntimeConfig) attachNotifierToJobs() {
 	for i := range cfg.Jobs {
 		cfg.Jobs[i].Notifier = cfg.Notifier
 		cfg.Jobs[i].Google = cfg.Google
-		profileName := cfg.LLMs.Default
-		if strings.TrimSpace(cfg.Jobs[i].LLMProfile) != "" {
-			profileName = cfg.Jobs[i].LLMProfile
-		}
-		if profileName != "" && cfg.LLMs.Profiles != nil {
-			if profile, ok := cfg.LLMs.Profiles[profileName]; ok {
-				cfg.Jobs[i].LLM = profile
-			}
+		if resolved, ok := cfg.LLMs.Resolve(cfg.Jobs[i].LLMOverride); ok {
+			cfg.Jobs[i].LLM = resolved
 		}
 	}
+}
+
+func (cfg LLMRegistryConfig) Resolve(selector LLMSelector) (LLMConfig, bool) {
+	if cfg.IsZero() {
+		return LLMConfig{}, false
+	}
+	if selector.IsZero() {
+		selector = cfg.Default
+	}
+	profileName := strings.TrimSpace(selector.Profile)
+	if profileName == "" {
+		profileName = strings.TrimSpace(selector.Provider)
+	}
+	if profileName == "" {
+		profileName = strings.TrimSpace(cfg.Default.Profile)
+	}
+	if profileName == "" {
+		profileName = strings.TrimSpace(cfg.Default.Provider)
+	}
+	provider, ok := cfg.Providers[profileName]
+	if !ok {
+		return LLMConfig{}, false
+	}
+	model := strings.TrimSpace(selector.Model)
+	if model == "" {
+		model = strings.TrimSpace(cfg.Default.Model)
+	}
+	return LLMConfig{
+		Profile:   provider.Profile,
+		Provider:  provider.Provider,
+		Model:     model,
+		APIKeyEnv: provider.APIKeyEnv,
+		BaseURL:   provider.BaseURL,
+	}, true
 }
 
 func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, LLMRegistryConfig, bool, time.Duration, error) {
@@ -132,8 +179,8 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 	var current *JobConfig
 	var google GoogleConfig
 	var notifier NotifierConfig
-	llmRegistry := LLMRegistryConfig{Profiles: map[string]LLMConfig{}}
-	var currentLLM *LLMConfig
+	llmRegistry := LLMRegistryConfig{Providers: map[string]LLMProviderConfig{}}
+	var currentLLMProvider *LLMProviderConfig
 	var sawJobs bool
 	var legacyInterval time.Duration
 	var section string
@@ -153,8 +200,20 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			section = "llms"
 			continue
 		}
-		if line == "profiles:" && section == "llms" {
-			section = "llms.profiles"
+		if line == "default:" && strings.HasPrefix(section, "llms") {
+			section = "llms.default"
+			continue
+		}
+		if line == "providers:" && strings.HasPrefix(section, "llms") {
+			section = "llms.providers"
+			continue
+		}
+		if line == "models:" && section == "llms.providers" {
+			section = "llms.providers.models"
+			continue
+		}
+		if line == "llm:" && section == "jobs" && current != nil {
+			section = "jobs.llm"
 			continue
 		}
 		if line == "notifier:" {
@@ -171,18 +230,29 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			continue
 		}
 		if strings.HasPrefix(line, "- ") {
-			if section == "llms.profiles" {
-				if currentLLM != nil {
-					storeLLMProfile(llmRegistry.Profiles, *currentLLM)
+			if section == "llms.providers.models" && !strings.HasPrefix(raw, "        - ") {
+				section = "llms.providers"
+			}
+			if section == "llms.providers.models" {
+				model := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "- ")), `"'`)
+				if model != "" && currentLLMProvider != nil {
+					currentLLMProvider.Models = append(currentLLMProvider.Models, model)
 				}
-				currentLLM = &LLMConfig{}
+				continue
+			}
+			if section == "llms.providers" {
+				if currentLLMProvider != nil {
+					storeLLMProvider(&llmRegistry, *currentLLMProvider)
+				}
+				currentLLMProvider = &LLMProviderConfig{}
 				line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
 				key, value, ok := strings.Cut(line, ":")
 				if ok {
-					parseLLMConfigField(currentLLM, strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), `"'`))
+					parseLLMProviderField(currentLLMProvider, strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), `"'`))
 				}
 				continue
-			} else if section == "notifier.gmail.to" {
+			}
+			if section == "notifier.gmail.to" {
 				recipient := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "- ")), `"'`)
 				if recipient != "" {
 					notifier.Gmail.To = append(notifier.Gmail.To, recipient)
@@ -230,15 +300,13 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			}
 			continue
 		}
-		if section == "llms" {
-			if key == "default" {
-				llmRegistry.Default = value
-			}
+		if section == "llms.default" {
+			parseLLMSelectorField(&llmRegistry.Default, key, value)
 			continue
 		}
-		if section == "llms.profiles" {
-			if currentLLM != nil {
-				parseLLMConfigField(currentLLM, key, value)
+		if section == "llms.providers" || section == "llms.providers.models" {
+			if currentLLMProvider != nil {
+				parseLLMProviderField(currentLLMProvider, key, value)
 			}
 			continue
 		}
@@ -259,7 +327,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			continue
 		}
 		if section == "jobs.llm" {
-			parseLLMConfigField(&current.LLM, key, value)
+			parseLLMSelectorField(&current.LLMOverride, key, value)
 			continue
 		}
 		if section != "jobs" || !sawJobs || current == nil {
@@ -293,7 +361,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			}
 			current.MaxChars = maxChars
 		case "llm_profile":
-			current.LLMProfile = value
+			current.LLMOverride.Profile = value
 		case "output_path":
 			current.OutputPath = value
 		case "outbox_path":
@@ -303,8 +371,8 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 	if err := scanner.Err(); err != nil {
 		return nil, google, notifier, llmRegistry, sawJobs, legacyInterval, err
 	}
-	if currentLLM != nil {
-		storeLLMProfile(llmRegistry.Profiles, *currentLLM)
+	if currentLLMProvider != nil {
+		storeLLMProvider(&llmRegistry, *currentLLMProvider)
 	}
 	if current != nil {
 		jobs = append(jobs, *current)
@@ -312,21 +380,37 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 	return jobs, google, notifier, llmRegistry, sawJobs, legacyInterval, nil
 }
 
-func storeLLMProfile(profiles map[string]LLMConfig, profile LLMConfig) {
-	if strings.TrimSpace(profile.Name) == "" {
+func storeLLMProvider(registry *LLMRegistryConfig, provider LLMProviderConfig) {
+	if strings.TrimSpace(provider.Profile) == "" {
+		provider.Profile = strings.TrimSpace(provider.Provider)
+	}
+	if strings.TrimSpace(provider.Profile) == "" {
 		return
 	}
-	profiles[profile.Name] = profile
+	if _, exists := registry.Providers[provider.Profile]; exists {
+		registry.Duplicates = append(registry.Duplicates, provider.Profile)
+		return
+	}
+	registry.Providers[provider.Profile] = provider
 }
 
-func parseLLMConfigField(cfg *LLMConfig, key, value string) {
+func parseLLMSelectorField(selector *LLMSelector, key, value string) {
 	switch key {
-	case "name":
-		cfg.Name = value
+	case "profile":
+		selector.Profile = value
+	case "provider":
+		selector.Provider = value
+	case "model":
+		selector.Model = value
+	}
+}
+
+func parseLLMProviderField(cfg *LLMProviderConfig, key, value string) {
+	switch key {
+	case "profile", "name":
+		cfg.Profile = value
 	case "provider":
 		cfg.Provider = value
-	case "model":
-		cfg.Model = value
 	case "api_key_env":
 		cfg.APIKeyEnv = value
 	case "base_url":
@@ -381,6 +465,9 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 			if err := validateAIEmailJobConfig(job); err != nil {
 				return err
 			}
+			if provider, ok := cfg.LLMs.Providers[job.ResolvedLLM().Profile]; ok && !stringInSlice(job.ResolvedLLM().Model, provider.Models) {
+				return fmt.Errorf("ai_email job %q model %q is not listed for llm provider/profile %q", job.Name, job.ResolvedLLM().Model, job.ResolvedLLM().Profile)
+			}
 		}
 	}
 	return nil
@@ -390,30 +477,53 @@ func validateLLMRegistryConfig(llms LLMRegistryConfig) error {
 	if llms.IsZero() {
 		return nil
 	}
-	if strings.TrimSpace(llms.Default) == "" {
-		return fmt.Errorf("llms default profile is required")
+	if len(llms.Duplicates) > 0 {
+		return fmt.Errorf("duplicate llm provider profile %q", llms.Duplicates[0])
 	}
-	if _, ok := llms.Profiles[llms.Default]; !ok {
-		return fmt.Errorf("llms default profile %q is not defined", llms.Default)
+	if strings.TrimSpace(llms.Default.Provider) == "" && strings.TrimSpace(llms.Default.Profile) == "" {
+		return fmt.Errorf("llms default provider is required")
 	}
-	for name, profile := range llms.Profiles {
-		if strings.TrimSpace(name) == "" || strings.TrimSpace(profile.Name) == "" {
-			return fmt.Errorf("llm profile missing name")
+	if strings.TrimSpace(llms.Default.Model) == "" {
+		return fmt.Errorf("llms default model is required")
+	}
+	defaultProfile := llms.Default.Profile
+	if strings.TrimSpace(defaultProfile) == "" {
+		defaultProfile = llms.Default.Provider
+	}
+	defaultProvider, ok := llms.Providers[defaultProfile]
+	if !ok {
+		return fmt.Errorf("llms default provider/profile %q is not defined", defaultProfile)
+	}
+	if !stringInSlice(llms.Default.Model, defaultProvider.Models) {
+		return fmt.Errorf("llms default model %q is not listed for provider/profile %q", llms.Default.Model, defaultProfile)
+	}
+	for profileName, provider := range llms.Providers {
+		if strings.TrimSpace(profileName) == "" || strings.TrimSpace(provider.Profile) == "" {
+			return fmt.Errorf("llm provider profile missing name")
 		}
-		if name != profile.Name {
-			return fmt.Errorf("llm profile name mismatch %q != %q", name, profile.Name)
+		if profileName != provider.Profile {
+			return fmt.Errorf("llm provider profile mismatch %q != %q", profileName, provider.Profile)
 		}
-		if strings.TrimSpace(profile.Provider) == "" {
-			return fmt.Errorf("llm profile %q requires provider", name)
+		if strings.TrimSpace(provider.Provider) == "" {
+			return fmt.Errorf("llm provider profile %q requires provider", profileName)
 		}
-		if strings.TrimSpace(profile.Model) == "" {
-			return fmt.Errorf("llm profile %q requires model", name)
+		if strings.TrimSpace(provider.APIKeyEnv) == "" {
+			return fmt.Errorf("llm provider profile %q requires api_key_env", profileName)
 		}
-		if strings.TrimSpace(profile.APIKeyEnv) == "" {
-			return fmt.Errorf("llm profile %q requires api_key_env", name)
+		if len(provider.Models) == 0 {
+			return fmt.Errorf("llm provider profile %q requires at least one model", profileName)
 		}
 	}
 	return nil
+}
+
+func stringInSlice(value string, items []string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func validateAIEmailJobConfig(job JobConfig) error {
@@ -424,8 +534,8 @@ func validateAIEmailJobConfig(job JobConfig) error {
 		return fmt.Errorf("ai_email job %q requires positive max_chars", job.Name)
 	}
 	llmConfig := job.ResolvedLLM()
-	if strings.TrimSpace(job.LLMProfile) != "" && llmConfig.IsZero() {
-		return fmt.Errorf("ai_email job %q references unknown llm_profile %q", job.Name, job.LLMProfile)
+	if !job.LLMOverride.IsZero() && llmConfig.IsZero() {
+		return fmt.Errorf("ai_email job %q references unknown llm provider/profile", job.Name)
 	}
 	if strings.TrimSpace(llmConfig.Provider) == "" {
 		return fmt.Errorf("ai_email job %q requires llm provider", job.Name)

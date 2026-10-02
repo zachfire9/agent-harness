@@ -138,22 +138,26 @@ The Gmail notifier requires a local Google token file with the `https://www.goog
 
 ### AI email jobs
 
-The `ai_email` job type generates bounded email body content with a configured LLM, then sends it through the same notifier path used by `notify_test`. It supports multiple named LLM profiles, a default profile, and a per-job `llm_profile` selector when a job should use something other than the default.
+The `ai_email` job type generates bounded email body content with a configured LLM, then sends it through the same notifier path used by `notify_test`. It supports provider-level credentials with one or more allowed models per provider, a default provider/model, and per-job provider/model selection when a job should use something other than the default.
 
-Example with multiple connected providers and a default profile:
+Example with multiple connected providers and a default model:
 
 ```yaml
 llms:
-  default: openrouter-default
-  profiles:
-    - name: openrouter-default
-      provider: openrouter
-      model: "openai/gpt-4o-mini"
+  default:
+    provider: openrouter
+    model: "openai/gpt-4o-mini"
+  providers:
+    - provider: openrouter
       api_key_env: OPENROUTER_API_KEY
-    - name: openai-cheap
-      provider: openai
-      model: "gpt-4o-mini"
+      models:
+        - "openai/gpt-4o-mini"
+        - "anthropic/claude-3-5-haiku-latest"
+    - provider: openai
       api_key_env: OPENAI_API_KEY
+      models:
+        - "gpt-4o-mini"
+        - "gpt-4.1-mini"
 notifier:
   type: gmail
   gmail:
@@ -170,7 +174,7 @@ jobs:
     max_chars: 1200
 ```
 
-A job can select a non-default profile by name without repeating provider/model/key settings:
+A job can select a non-default provider/model without repeating key settings:
 
 ```yaml
 jobs:
@@ -180,10 +184,34 @@ jobs:
     interval_seconds: 604800
     prompt: "Write a practical software engineering tip."
     max_chars: 1500
-    llm_profile: openai-cheap
+    llm:
+      provider: openai
+      model: "gpt-4o-mini"
 ```
 
-`api_key_env` names an environment variable in an LLM profile; raw API keys must not be stored in `config/config.yaml`, and job entries should only reference profile names. `provider` currently supports `openrouter`, `openai`, or `openai_compatible` with `base_url`. Job state records success/failure metadata only; it does not store the prompt, generated email body, API key, or raw provider response.
+If you need multiple accounts for the same provider, give the additional entry an explicit `profile` and reference that profile from the job:
+
+```yaml
+llms:
+  providers:
+    - provider: openai
+      profile: openai-work
+      api_key_env: OPENAI_WORK_API_KEY
+      models:
+        - "gpt-4o-mini"
+jobs:
+  - name: work-ai-email
+    type: ai_email
+    enabled: true
+    interval_seconds: 86400
+    prompt: "Write a concise work note."
+    max_chars: 1200
+    llm:
+      profile: openai-work
+      model: "gpt-4o-mini"
+```
+
+`api_key_env` names an environment variable in a provider/profile entry; raw API keys must not be stored in `config/config.yaml`, and job entries should only reference provider/profile/model selectors. By default, the profile name is the provider name; if you configure the same provider more than once, use an explicit `profile`. `provider` currently supports `openrouter`, `openai`, or `openai_compatible` with `base_url`. Job state records success/failure metadata only; it does not store the prompt, generated email body, API key, or raw provider response.
 
 ## Inspect and manually run jobs
 
