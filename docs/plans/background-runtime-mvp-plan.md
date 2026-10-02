@@ -886,10 +886,161 @@ Live verification may use the dedicated agent Google account by forcing an expir
 
 ---
 
-## Step 11 — Google Docs read-only source adapter
+## Step 11 — Configurable LLM settings and AI email job
 
 - **Status:** Planned
-- **Branch:** `step-31-google-docs-source`
+- **Branch:** `step-31-ai-email-job`
+- **Pull Request:** TBD
+- **Concept:** Add the first model-backed scheduled job with safe global LLM defaults and per-job overrides, then send the bounded generated content through the existing notifier.
+
+### Objective
+
+Add an `ai_email` job type that can be run manually or by the daemon. The job should resolve a default top-level LLM config, allow per-job provider/model overrides, generate bounded text from a configured prompt, and deliver that text through the already-configured notifier.
+
+### Scope
+
+- Add safe top-level LLM config, conceptually:
+
+  ```yaml
+  llm:
+    provider: openrouter
+    model: openai/gpt-4o-mini
+    api_key_env: OPENROUTER_API_KEY
+  ```
+
+- Add per-job LLM override support, conceptually:
+
+  ```yaml
+  jobs:
+    - name: daily-ai-email
+      type: ai_email
+      enabled: true
+      interval_seconds: 86400
+      prompt: "Write a concise daily learning note for Zach."
+      max_chars: 1200
+    - name: weekly-ai-email
+      type: ai_email
+      enabled: true
+      interval_seconds: 604800
+      prompt: "Write a practical software engineering tip."
+      max_chars: 1500
+      llm:
+        provider: anthropic
+        model: claude-3-5-haiku-latest
+        api_key_env: ANTHROPIC_API_KEY
+  ```
+
+- Resolve LLM settings as: per-job `llm:` override first, top-level `llm:` default second.
+- Keep raw API keys out of YAML; config may reference environment variable names or later secret-file paths only.
+- Add a small fake-testable LLM client/interface for job execution.
+- Bound generated content with `max_chars` before delivery.
+- Send generated content through the existing notifier interface, so Gmail/file-outbox behavior stays shared.
+- Record only safe job metadata in `state/jobs.json`; do not dump API keys, full provider responses, or full generated email bodies.
+- Keep recipient selection in the existing notifier config for this step; do not add per-job recipients unless needed later.
+- Do not add Google Docs reading, source adapters, daily brief rotations, Telegram delivery, or model-driven rich brief composition in this step.
+
+### Tests
+
+Add deterministic tests for:
+
+- top-level LLM config parsing and validation;
+- per-job LLM override parsing and resolution;
+- `ai_email` uses the global default when no job override is provided;
+- `ai_email` uses the per-job provider/model when configured;
+- missing usable LLM config fails clearly for `ai_email` jobs;
+- fake LLM output is bounded by `max_chars`;
+- notifier receives the bounded generated content;
+- LLM/notifier failures are recorded as failed job state with secret-safe errors;
+- state/status output does not contain API keys or raw provider responses.
+
+### Verification
+
+```bash
+go test ./...
+go build -o /tmp/agent-harness-step11 ./cmd/agent-harness
+agent-harness jobs run daily-ai-email --instance default
+agent-harness jobs list --instance default --json
+```
+
+Live verification may use a cheap/default model profile and the dedicated agent Gmail account to send one manual `ai_email` smoke-test message to a configured recipient.
+
+---
+
+## Step 12 — Local background service for scheduled AI email
+
+- **Status:** Planned
+- **Branch:** `step-32-local-ai-email-service`
+- **Pull Request:** TBD
+- **Concept:** Install and run the app as a local background service on the agent machine with a real scheduled AI-email job.
+
+### Objective
+
+Configure the local instance on the agent machine so the daemon runs unattended and periodically sends AI-generated content to the user-specified recipient through Gmail.
+
+### Scope
+
+- Install/update the local binary from the merged app code.
+- Configure the local instance home, conceptually:
+
+  ```text
+  ~/.local/share/agent-harness/
+  ```
+
+- Configure local secrets under `config/secrets/` or environment files with restricted permissions.
+- Configure Gmail notifier recipients using the existing global notifier config, conceptually:
+
+  ```yaml
+  notifier:
+    type: gmail
+    gmail:
+      from: "alf.fire9@gmail.com"
+      to:
+        - "user@example.com"
+      subject_prefix: "[agent-harness]"
+  ```
+
+- Configure one temporary short-interval AI-email smoke job, then switch to the intended cadence after verification.
+- Install/enable/restart the user-level service, conceptually:
+
+  ```bash
+  agent-harness service install
+  systemctl --user enable --now agent-harness@default
+  ```
+
+- Verify daemon health, scheduled job state, Gmail delivery, and token refresh behavior.
+- Keep local real recipient emails, API keys, OAuth tokens, client secrets, and machine-specific secret values out of committed files and PR text.
+- Do not add new app features unless needed to make the already-supported config/service path work.
+
+### Tests
+
+This step is mostly operational, but should still include executable verification where possible:
+
+- `go test ./...` from the merged code before install;
+- service template/status command smoke tests if code/docs change;
+- manual local verification that daemon status becomes healthy;
+- manual local verification that a scheduled `ai_email` job succeeds;
+- manual local verification that the received email content is AI-generated and bounded.
+
+### Verification
+
+```bash
+go test ./...
+go build -o /tmp/agent-harness-step12 ./cmd/agent-harness
+agent-harness service install
+systemctl --user enable --now agent-harness@default
+systemctl --user status agent-harness@default
+agent-harness status --instance default --json
+agent-harness jobs list --instance default --json
+```
+
+Live verification should send at most one or two smoke-test emails, then restore the configured interval to the intended cadence.
+
+---
+
+## Step 13 — Google Docs read-only source adapter
+
+- **Status:** Planned
+- **Branch:** `step-33-google-docs-source`
 - **Pull Request:** TBD
 - **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.
 
@@ -941,10 +1092,10 @@ Live verification should use a test/shared document with non-sensitive content f
 
 ---
 
-## Step 12 — First Google-backed scheduled digest job
+## Step 14 — First Google-backed scheduled digest job
 
 - **Status:** Planned
-- **Branch:** `step-32-google-doc-digest-job`
+- **Branch:** `step-34-google-doc-digest-job`
 - **Pull Request:** TBD
 - **Concept:** Combine the scheduler, Google Docs source adapter, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
 
@@ -1075,8 +1226,10 @@ After Step 07, continue with Google integration in thin, security-first slices i
 Step 08 — Google OAuth account connection and secret-safe status
 Step 09 — Gmail notifier delivery adapter
 Step 10 — Google OAuth token refresh for Google-backed actions
-Step 11 — Google Docs read-only source adapter
-Step 12 — First Google-backed scheduled digest job
+Step 11 — Configurable LLM settings and AI email job
+Step 12 — Local background service for scheduled AI email
+Step 13 — Google Docs read-only source adapter
+Step 14 — First Google-backed scheduled digest job
 ```
 
-That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, and deterministic source/digest behavior before adding richer content, rotations, enrichment, or model polish.
+That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, one bounded AI-generated email job, and deterministic source/digest behavior before adding richer daily-brief content, rotations, enrichment, broad scopes, or alternate delivery channels.
