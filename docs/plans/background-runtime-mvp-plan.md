@@ -890,7 +890,7 @@ Live verification may use the dedicated agent Google account by forcing an expir
 
 - **Status:** Completed
 - **Branch:** `step-31-ai-email-job`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/33
 - **Concept:** Add the first model-backed scheduled job with safe global LLM defaults and per-job overrides, then send the bounded generated content through the existing notifier.
 
 ### Objective
