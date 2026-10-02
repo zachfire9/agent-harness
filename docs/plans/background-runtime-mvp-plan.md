@@ -982,7 +982,7 @@ Live verification may use a cheap/default model profile and the dedicated agent 
 
 - **Status:** In Progress
 - **Branch:** `step-32-local-ai-email-service`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/34
 - **Concept:** Install and run the app as a local background service on the agent machine with a real scheduled AI-email job.
 
 ### Objective
