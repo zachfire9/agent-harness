@@ -1049,12 +1049,74 @@ Live verification should send at most one or two smoke-test emails, then restore
 
 ---
 
-## Step 13 — Automated GitHub release binaries
+## Step 13 — Time-of-day scheduling for daily jobs
 
 - **Status:** Planned
-- **Branch:** `step-33-automated-release-binaries`
+- **Branch:** `step-33-time-of-day-scheduling`
 - **Pull Request:** TBD
-- **Concept:** Once the LLM email functionality works end-to-end, publish the first versioned app binary so installs can use downloaded release artifacts instead of a source checkout and local `go build`.
+- **Concept:** Add wall-clock daily scheduling so background jobs can run at a configured local time instead of only every N seconds after their previous run.
+
+### Objective
+
+Let configured jobs run once per day at an explicit time and timezone, such as `08:00` in `America/New_York`, while preserving the existing `interval_seconds` behavior for simple interval jobs and smoke tests.
+
+### Scope
+
+- Extend job config with a daily schedule option, conceptually:
+
+  ```yaml
+  jobs:
+    - name: daily-ai-email
+      type: ai_email
+      enabled: true
+      schedule:
+        daily_at: "08:00"
+        timezone: "America/New_York"
+      prompt: "Write a concise daily learning note."
+      max_chars: 1200
+  ```
+
+- Keep `interval_seconds` supported for existing jobs and short smoke-test loops.
+- Validate schedule config clearly:
+  - `daily_at` must be a valid 24-hour `HH:MM` value;
+  - `timezone` must be a valid IANA timezone name;
+  - a job should use either `interval_seconds` or `schedule`, not both.
+- Compute `next_run_at` from wall-clock time in the configured timezone.
+- If today's configured time has already passed, schedule the next run for tomorrow.
+- Preserve existing job-state shape where practical so `status` and `jobs list` keep working.
+- Do not add richer cron syntax yet.
+- Do not require Google Docs, release automation, or new content types in this step.
+
+### Tests
+
+Add deterministic tests for:
+
+- parsing and validating daily schedule config;
+- rejecting malformed times, unknown timezones, and mixed interval-plus-schedule config;
+- computing the next run for later today;
+- computing the next run for tomorrow when today's time already passed;
+- honoring timezone boundaries rather than using only UTC;
+- preserving existing interval-based job behavior.
+
+### Verification
+
+```bash
+go test ./...
+go build -o /tmp/agent-harness-step13 ./cmd/agent-harness
+agent-harness daemon --instance default --test
+agent-harness jobs list --instance default --json
+```
+
+Live verification can use a near-future wall-clock time with a harmless local/file notifier or bounded AI-email smoke job, then restore the intended daily time.
+
+---
+
+## Step 14 — Automated GitHub release binaries
+
+- **Status:** Planned
+- **Branch:** `step-34-automated-release-binaries`
+- **Pull Request:** TBD
+- **Concept:** Once the LLM email functionality works end-to-end and can be scheduled at a real daily time, publish the first versioned app binary so installs can use downloaded release artifacts instead of a source checkout and local `go build`.
 
 ### Objective
 
@@ -1130,10 +1192,10 @@ agent-harness status --instance default --json
 
 ---
 
-## Step 14 — Google Docs read-only source adapter
+## Step 15 — Google Docs read-only source adapter
 
 - **Status:** Planned
-- **Branch:** `step-34-google-docs-source`
+- **Branch:** `step-35-google-docs-source`
 - **Pull Request:** TBD
 - **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.
 
@@ -1185,10 +1247,10 @@ Live verification should use a test/shared document with non-sensitive content f
 
 ---
 
-## Step 15 — First Google-backed scheduled digest job
+## Step 16 — First Google-backed scheduled digest job
 
 - **Status:** Planned
-- **Branch:** `step-35-google-doc-digest-job`
+- **Branch:** `step-36-google-doc-digest-job`
 - **Pull Request:** TBD
 - **Concept:** Combine the scheduler, Google Docs source adapter, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
 
@@ -1321,9 +1383,10 @@ Step 09 — Gmail notifier delivery adapter
 Step 10 — Google OAuth token refresh for Google-backed actions
 Step 11 — Configurable LLM settings and AI email job
 Step 12 — Local background service for scheduled AI email
-Step 13 — Automated GitHub release binaries
-Step 14 — Google Docs read-only source adapter
-Step 15 — First Google-backed scheduled digest job
+Step 13 — Time-of-day scheduling for daily jobs
+Step 14 — Automated GitHub release binaries
+Step 15 — Google Docs read-only source adapter
+Step 16 — First Google-backed scheduled digest job
 ```
 
-That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, one bounded AI-generated email job, a downloadable first app version, and deterministic source/digest behavior before adding richer daily-brief content, rotations, enrichment, broad scopes, or alternate delivery channels.
+That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, one bounded AI-generated email job, real wall-clock daily scheduling, a downloadable first app version, and deterministic source/digest behavior before adding richer daily-brief content, rotations, enrichment, broad scopes, or alternate delivery channels.
