@@ -888,27 +888,38 @@ Live verification may use the dedicated agent Google account by forcing an expir
 
 ## Step 11 — Configurable LLM settings and AI email job
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-31-ai-email-job`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/33
 - **Concept:** Add the first model-backed scheduled job with safe global LLM defaults and per-job overrides, then send the bounded generated content through the existing notifier.
 
 ### Objective
 
-Add an `ai_email` job type that can be run manually or by the daemon. The job should resolve a default top-level LLM config, allow per-job provider/model overrides, generate bounded text from a configured prompt, and deliver that text through the already-configured notifier.
+Add an `ai_email` job type that can be run manually or by the daemon. The job should resolve a default provider/model, allow per-job provider/model selection without repeating credentials, generate bounded text from a configured prompt, and deliver that text through the already-configured notifier.
 
 ### Scope
 
-- Add safe top-level LLM config, conceptually:
+- Add safe provider-scoped LLM config with default provider/model selection, conceptually:
 
   ```yaml
-  llm:
-    provider: openrouter
-    model: openai/gpt-4o-mini
-    api_key_env: OPENROUTER_API_KEY
+  llms:
+    default:
+      provider: openrouter
+      model: openai/gpt-4o-mini
+    providers:
+      - provider: openrouter
+        api_key_env: OPENROUTER_API_KEY
+        models:
+          - openai/gpt-4o-mini
+          - anthropic/claude-3-5-haiku-latest
+      - provider: openai
+        api_key_env: OPENAI_API_KEY
+        models:
+          - gpt-4o-mini
+          - gpt-4.1-mini
   ```
 
-- Add per-job LLM override support, conceptually:
+- Add per-job LLM provider/model selection without repeating key settings, conceptually:
 
   ```yaml
   jobs:
@@ -925,13 +936,13 @@ Add an `ai_email` job type that can be run manually or by the daemon. The job sh
       prompt: "Write a practical software engineering tip."
       max_chars: 1500
       llm:
-        provider: anthropic
-        model: claude-3-5-haiku-latest
-        api_key_env: ANTHROPIC_API_KEY
+        provider: openai
+        model: gpt-4o-mini
   ```
 
-- Resolve LLM settings as: per-job `llm:` override first, top-level `llm:` default second.
-- Keep raw API keys out of YAML; config may reference environment variable names or later secret-file paths only.
+- Keep profile support for multiple accounts on the same provider: by default a provider entry's profile name is the provider name; if a second account for the same provider is configured, it needs an explicit `profile`, and jobs can select that profile.
+- Resolve LLM settings as: per-job `llm` selector first, default provider/model second.
+- Keep raw API keys out of YAML job entries; provider/profile config may reference environment variable names or later secret-file paths only.
 - Add a small fake-testable LLM client/interface for job execution.
 - Bound generated content with `max_chars` before delivery.
 - Send generated content through the existing notifier interface, so Gmail/file-outbox behavior stays shared.
@@ -943,10 +954,11 @@ Add an `ai_email` job type that can be run manually or by the daemon. The job sh
 
 Add deterministic tests for:
 
-- top-level LLM config parsing and validation;
-- per-job LLM override parsing and resolution;
-- `ai_email` uses the global default when no job override is provided;
-- `ai_email` uses the per-job provider/model when configured;
+- provider-scoped LLM config parsing and validation;
+- per-job `llm` provider/model selector parsing and resolution;
+- `ai_email` uses the default provider/model when no job override is selected;
+- `ai_email` uses the selected provider/model when configured;
+- duplicate provider entries without explicit profile names fail clearly;
 - missing usable LLM config fails clearly for `ai_email` jobs;
 - fake LLM output is bounded by `max_chars`;
 - notifier receives the bounded generated content;
