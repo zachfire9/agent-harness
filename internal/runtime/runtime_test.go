@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -300,6 +303,80 @@ func TestReadRuntimeConfigRejectsNotifyTestOutboxOutsideInstanceHome(t *testing.
 	}
 }
 
+func TestReadRuntimeConfigParsesGmailNotifierConfig(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scope_profile: "gmail_send"
+notifier:
+  type: gmail
+  gmail:
+    from: "agent@example.com"
+    to:
+      - "operator@example.com"
+    subject_prefix: "[agent-harness]"
+jobs:
+  - name: notify-test
+    type: notify_test
+    enabled: true
+    interval_seconds: 60
+    message: "delivery adapter works"
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if cfg.Notifier.Type != "gmail" || cfg.Notifier.Gmail.From != "agent@example.com" || cfg.Notifier.Gmail.SubjectPrefix != "[agent-harness]" {
+		t.Fatalf("unexpected notifier config: %#v", cfg.Notifier)
+	}
+	if len(cfg.Notifier.Gmail.To) != 1 || cfg.Notifier.Gmail.To[0] != "operator@example.com" {
+		t.Fatalf("unexpected gmail recipients: %#v", cfg.Notifier.Gmail.To)
+	}
+	if cfg.Jobs[0].Notifier.Type != "gmail" {
+		t.Fatalf("expected notify_test job to inherit notifier config, got %#v", cfg.Jobs[0].Notifier)
+	}
+}
+
+func TestReadRuntimeConfigRejectsGmailNotifierWithoutGmailScope(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  token_path: "config/secrets/google-token.json"
+  scope_profile: "docs_readonly"
+notifier:
+  type: gmail
+  gmail:
+    from: "agent@example.com"
+    to:
+      - "operator@example.com"
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), "gmail notifier requires google scope_profile gmail_send") {
+		t.Fatalf("expected gmail scope validation error, got %v", err)
+	}
+}
+
 func TestHeartbeatJobStateRoundTripAndJSONShape(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -528,6 +605,84 @@ func TestNotifyTestJobUsesNotifierInterface(t *testing.T) {
 	}
 	if state.Status != JobSucceeded || len(notifier.messages) != 1 || notifier.messages[0].Body != "hello" {
 		t.Fatalf("expected notify_test to send through notifier, state=%#v messages=%#v", state, notifier.messages)
+	}
+}
+
+func TestGmailNotifierSendsThroughGmailAPIWithBearerToken(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-token.json", `{"access_token":"ya29.test-token","scope":"https://www.googleapis.com/auth/gmail.send","expiry":"2099-01-02T03:04:05Z"}`)
+	var gotPath, gotAuth string
+	var gotRequest map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
+			t.Fatalf("decode gmail request: %v", err)
+		}
+		fmt.Fprintln(w, `{"id":"gmail-message-id"}`)
+	}))
+	defer server.Close()
+
+	notifier := gmailNotifier{
+		paths:    paths,
+		google:   GoogleConfig{TokenPath: "config/secrets/google-token.json", ScopeProfile: "gmail_send"},
+		config:   GmailNotifierConfig{From: "agent@example.com", To: []string{"operator@example.com"}, SubjectPrefix: "[agent-harness]"},
+		endpoint: server.URL,
+		client:   server.Client(),
+	}
+	message := Message{Job: "notify-test", Body: "delivery adapter works", Timestamp: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+
+	if err := notifier.Send(context.Background(), message); err != nil {
+		t.Fatalf("gmail send failed: %v", err)
+	}
+	if gotPath != "/gmail/v1/users/me/messages/send" || gotAuth != "Bearer ya29.test-token" {
+		t.Fatalf("unexpected gmail request path/auth: path=%q auth=%q", gotPath, gotAuth)
+	}
+	if gotRequest["raw"] == "" || strings.Contains(gotRequest["raw"], "delivery adapter works") {
+		t.Fatalf("expected compact encoded raw gmail payload without plain body leak, got %#v", gotRequest)
+	}
+}
+
+func TestRunNotifyTestJobWithGmailNotifierRecordsSafeMissingTokenError(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{
+		Google:   GoogleConfig{TokenPath: "config/secrets/google-token.json", ScopeProfile: "gmail_send"},
+		Notifier: NotifierConfig{Type: "gmail", Gmail: GmailNotifierConfig{From: "agent@example.com", To: []string{"operator@example.com"}}},
+		Jobs:     []JobConfig{{Name: "notify-test", Type: "notify_test", Enabled: true, Interval: time.Minute, Message: "secret message body"}},
+	}
+	cfg.attachNotifierToJobs()
+
+	state, err := RunConfiguredJobNow(paths, cfg, "notify-test", now)
+	if err == nil || !strings.Contains(err.Error(), "google token is missing") {
+		t.Fatalf("expected missing token error, got %v", err)
+	}
+	if state.Status != JobFailed || state.LastError == "" || state.OutputPath != "" || strings.Contains(state.LastError, "secret message body") || strings.Contains(state.LastError, "access_token") {
+		t.Fatalf("expected safe failed state, got %#v", state)
+	}
+}
+
+func TestGmailNotifierRejectsExpiredToken(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-token.json", `{"access_token":"ya29.test-token","scope":"https://www.googleapis.com/auth/gmail.send","expiry":"2000-01-02T03:04:05Z"}`)
+	notifier := gmailNotifier{
+		paths:  paths,
+		google: GoogleConfig{TokenPath: "config/secrets/google-token.json", ScopeProfile: "gmail_send"},
+		config: GmailNotifierConfig{From: "agent@example.com", To: []string{"operator@example.com"}},
+	}
+
+	err = notifier.Send(context.Background(), Message{Job: "notify-test", Body: "hello", Timestamp: time.Now()})
+	if err == nil || !strings.Contains(err.Error(), "google token is expired") {
+		t.Fatalf("expected expired token error, got %v", err)
 	}
 }
 
