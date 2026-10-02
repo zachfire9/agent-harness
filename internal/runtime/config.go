@@ -13,6 +13,7 @@ import (
 const defaultHeartbeatJobInterval = time.Minute
 
 type LLMConfig struct {
+	Name      string
 	Provider  string
 	Model     string
 	APIKeyEnv string
@@ -20,7 +21,16 @@ type LLMConfig struct {
 }
 
 func (c LLMConfig) IsZero() bool {
-	return strings.TrimSpace(c.Provider) == "" && strings.TrimSpace(c.Model) == "" && strings.TrimSpace(c.APIKeyEnv) == "" && strings.TrimSpace(c.BaseURL) == ""
+	return strings.TrimSpace(c.Name) == "" && strings.TrimSpace(c.Provider) == "" && strings.TrimSpace(c.Model) == "" && strings.TrimSpace(c.APIKeyEnv) == "" && strings.TrimSpace(c.BaseURL) == ""
+}
+
+type LLMRegistryConfig struct {
+	Default  string
+	Profiles map[string]LLMConfig
+}
+
+func (c LLMRegistryConfig) IsZero() bool {
+	return strings.TrimSpace(c.Default) == "" && len(c.Profiles) == 0
 }
 
 type JobConfig struct {
@@ -35,6 +45,7 @@ type JobConfig struct {
 	OutboxPath string
 	Notifier   NotifierConfig
 	Google     GoogleConfig
+	LLMProfile string
 	LLM        LLMConfig
 }
 
@@ -46,7 +57,7 @@ type RuntimeConfig struct {
 	Jobs     []JobConfig
 	Google   GoogleConfig
 	Notifier NotifierConfig
-	LLM      LLMConfig
+	LLMs     LLMRegistryConfig
 }
 
 type NotifierConfig struct {
@@ -81,13 +92,13 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	}
 	defer file.Close()
 
-	parsedJobs, googleConfig, notifierConfig, llmConfig, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
+	parsedJobs, googleConfig, notifierConfig, llmRegistry, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
 	cfg.Google = googleConfig
 	cfg.Notifier = notifierConfig
-	cfg.LLM = llmConfig
+	cfg.LLMs = llmRegistry
 	if sawJobs {
 		cfg.Jobs = parsedJobs
 	} else if legacyInterval > 0 {
@@ -104,18 +115,25 @@ func (cfg *RuntimeConfig) attachNotifierToJobs() {
 	for i := range cfg.Jobs {
 		cfg.Jobs[i].Notifier = cfg.Notifier
 		cfg.Jobs[i].Google = cfg.Google
-		if cfg.Jobs[i].LLM.IsZero() {
-			cfg.Jobs[i].LLM = cfg.LLM
+		profileName := cfg.LLMs.Default
+		if strings.TrimSpace(cfg.Jobs[i].LLMProfile) != "" {
+			profileName = cfg.Jobs[i].LLMProfile
+		}
+		if profileName != "" && cfg.LLMs.Profiles != nil {
+			if profile, ok := cfg.LLMs.Profiles[profileName]; ok {
+				cfg.Jobs[i].LLM = profile
+			}
 		}
 	}
 }
 
-func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, LLMConfig, bool, time.Duration, error) {
+func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, LLMRegistryConfig, bool, time.Duration, error) {
 	var jobs []JobConfig
 	var current *JobConfig
 	var google GoogleConfig
 	var notifier NotifierConfig
-	var llmConfig LLMConfig
+	llmRegistry := LLMRegistryConfig{Profiles: map[string]LLMConfig{}}
+	var currentLLM *LLMConfig
 	var sawJobs bool
 	var legacyInterval time.Duration
 	var section string
@@ -131,12 +149,12 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			section = "google"
 			continue
 		}
-		if line == "llm:" {
-			if section == "jobs" && current != nil && strings.HasPrefix(raw, "    ") {
-				section = "jobs.llm"
-			} else {
-				section = "llm"
-			}
+		if line == "llms:" {
+			section = "llms"
+			continue
+		}
+		if line == "profiles:" && section == "llms" {
+			section = "llms.profiles"
 			continue
 		}
 		if line == "notifier:" {
@@ -153,7 +171,18 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			continue
 		}
 		if strings.HasPrefix(line, "- ") {
-			if section == "notifier.gmail.to" {
+			if section == "llms.profiles" {
+				if currentLLM != nil {
+					storeLLMProfile(llmRegistry.Profiles, *currentLLM)
+				}
+				currentLLM = &LLMConfig{}
+				line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				key, value, ok := strings.Cut(line, ":")
+				if ok {
+					parseLLMConfigField(currentLLM, strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), `"'`))
+				}
+				continue
+			} else if section == "notifier.gmail.to" {
 				recipient := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "- ")), `"'`)
 				if recipient != "" {
 					notifier.Gmail.To = append(notifier.Gmail.To, recipient)
@@ -183,7 +212,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		if !sawJobs && key == "heartbeat_job_interval_seconds" {
 			seconds, err := parsePositiveSeconds(value, "heartbeat_job_interval_seconds")
 			if err != nil {
-				return nil, GoogleConfig{}, NotifierConfig{}, LLMConfig{}, false, 0, err
+				return nil, GoogleConfig{}, NotifierConfig{}, LLMRegistryConfig{}, false, 0, err
 			}
 			legacyInterval = seconds
 			continue
@@ -201,8 +230,16 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			}
 			continue
 		}
-		if section == "llm" {
-			parseLLMConfigField(&llmConfig, key, value)
+		if section == "llms" {
+			if key == "default" {
+				llmRegistry.Default = value
+			}
+			continue
+		}
+		if section == "llms.profiles" {
+			if currentLLM != nil {
+				parseLLMConfigField(currentLLM, key, value)
+			}
 			continue
 		}
 		if strings.HasPrefix(section, "notifier") {
@@ -236,13 +273,13 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		case "enabled":
 			enabled, err := strconv.ParseBool(value)
 			if err != nil {
-				return nil, google, notifier, llmConfig, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
+				return nil, google, notifier, llmRegistry, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
 			}
 			current.Enabled = enabled
 		case "interval_seconds":
 			interval, err := parsePositiveSeconds(value, "interval_seconds")
 			if err != nil {
-				return nil, google, notifier, llmConfig, true, 0, err
+				return nil, google, notifier, llmRegistry, true, 0, err
 			}
 			current.Interval = interval
 		case "message":
@@ -252,9 +289,11 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		case "max_chars":
 			maxChars, err := strconv.Atoi(value)
 			if err != nil {
-				return nil, google, notifier, llmConfig, true, 0, fmt.Errorf("invalid max_chars for job %q: %q", current.Name, value)
+				return nil, google, notifier, llmRegistry, true, 0, fmt.Errorf("invalid max_chars for job %q: %q", current.Name, value)
 			}
 			current.MaxChars = maxChars
+		case "llm_profile":
+			current.LLMProfile = value
 		case "output_path":
 			current.OutputPath = value
 		case "outbox_path":
@@ -262,16 +301,28 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, google, notifier, llmConfig, sawJobs, legacyInterval, err
+		return nil, google, notifier, llmRegistry, sawJobs, legacyInterval, err
+	}
+	if currentLLM != nil {
+		storeLLMProfile(llmRegistry.Profiles, *currentLLM)
 	}
 	if current != nil {
 		jobs = append(jobs, *current)
 	}
-	return jobs, google, notifier, llmConfig, sawJobs, legacyInterval, nil
+	return jobs, google, notifier, llmRegistry, sawJobs, legacyInterval, nil
+}
+
+func storeLLMProfile(profiles map[string]LLMConfig, profile LLMConfig) {
+	if strings.TrimSpace(profile.Name) == "" {
+		return
+	}
+	profiles[profile.Name] = profile
 }
 
 func parseLLMConfigField(cfg *LLMConfig, key, value string) {
 	switch key {
+	case "name":
+		cfg.Name = value
 	case "provider":
 		cfg.Provider = value
 	case "model":
@@ -296,6 +347,9 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 		return err
 	}
 	if err := validateNotifierConfig(cfg.Notifier, cfg.Google); err != nil {
+		return err
+	}
+	if err := validateLLMRegistryConfig(cfg.LLMs); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -332,6 +386,36 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 	return nil
 }
 
+func validateLLMRegistryConfig(llms LLMRegistryConfig) error {
+	if llms.IsZero() {
+		return nil
+	}
+	if strings.TrimSpace(llms.Default) == "" {
+		return fmt.Errorf("llms default profile is required")
+	}
+	if _, ok := llms.Profiles[llms.Default]; !ok {
+		return fmt.Errorf("llms default profile %q is not defined", llms.Default)
+	}
+	for name, profile := range llms.Profiles {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(profile.Name) == "" {
+			return fmt.Errorf("llm profile missing name")
+		}
+		if name != profile.Name {
+			return fmt.Errorf("llm profile name mismatch %q != %q", name, profile.Name)
+		}
+		if strings.TrimSpace(profile.Provider) == "" {
+			return fmt.Errorf("llm profile %q requires provider", name)
+		}
+		if strings.TrimSpace(profile.Model) == "" {
+			return fmt.Errorf("llm profile %q requires model", name)
+		}
+		if strings.TrimSpace(profile.APIKeyEnv) == "" {
+			return fmt.Errorf("llm profile %q requires api_key_env", name)
+		}
+	}
+	return nil
+}
+
 func validateAIEmailJobConfig(job JobConfig) error {
 	if strings.TrimSpace(job.Prompt) == "" {
 		return fmt.Errorf("ai_email job %q requires prompt", job.Name)
@@ -340,6 +424,9 @@ func validateAIEmailJobConfig(job JobConfig) error {
 		return fmt.Errorf("ai_email job %q requires positive max_chars", job.Name)
 	}
 	llmConfig := job.ResolvedLLM()
+	if strings.TrimSpace(job.LLMProfile) != "" && llmConfig.IsZero() {
+		return fmt.Errorf("ai_email job %q references unknown llm_profile %q", job.Name, job.LLMProfile)
+	}
 	if strings.TrimSpace(llmConfig.Provider) == "" {
 		return fmt.Errorf("ai_email job %q requires llm provider", job.Name)
 	}

@@ -304,15 +304,22 @@ func TestReadRuntimeConfigRejectsNotifyTestOutboxOutsideInstanceHome(t *testing.
 	}
 }
 
-func TestReadRuntimeConfigParsesLLMDefaultsAndAIEmailOverrides(t *testing.T) {
+func TestReadRuntimeConfigParsesNamedLLMProfilesAndAIEmailProfileOverrides(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
 	}
-	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `llm:
-  provider: openrouter
-  model: openai/gpt-4o-mini
-  api_key_env: OPENROUTER_API_KEY
+	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `llms:
+  default: openrouter
+  profiles:
+    - name: openrouter
+      provider: openrouter
+      model: openai/gpt-4o-mini
+      api_key_env: OPENROUTER_API_KEY
+    - name: openai-cheap
+      provider: openai
+      model: gpt-4o-mini
+      api_key_env: OPENAI_API_KEY
 jobs:
   - name: daily-ai-email
     type: ai_email
@@ -326,27 +333,30 @@ jobs:
     interval_seconds: 604800
     prompt: "Write a practical software engineering tip."
     max_chars: 1500
-    llm:
-      provider: openai
-      model: gpt-4o-mini
-      api_key_env: OPENAI_API_KEY
+    llm_profile: openai-cheap
 `)
 
 	cfg, err := ReadRuntimeConfig(paths)
 	if err != nil {
 		t.Fatalf("expected config to parse, got %v", err)
 	}
-	if cfg.LLM.Provider != "openrouter" || cfg.LLM.Model != "openai/gpt-4o-mini" || cfg.LLM.APIKeyEnv != "OPENROUTER_API_KEY" {
-		t.Fatalf("unexpected top-level llm config: %#v", cfg.LLM)
+	if cfg.LLMs.Default != "openrouter" {
+		t.Fatalf("unexpected default llm profile: %q", cfg.LLMs.Default)
 	}
-	if got := cfg.Jobs[0].ResolvedLLM(); got.Provider != "openrouter" || got.Model != "openai/gpt-4o-mini" || got.APIKeyEnv != "OPENROUTER_API_KEY" {
-		t.Fatalf("expected first job to use top-level llm default, got %#v", got)
+	if got := cfg.Jobs[0].ResolvedLLM(); got.Name != "openrouter" || got.Provider != "openrouter" || got.Model != "openai/gpt-4o-mini" || got.APIKeyEnv != "OPENROUTER_API_KEY" {
+		t.Fatalf("expected first job to use default llm profile, got %#v", got)
+	}
+	if cfg.Jobs[0].LLMProfile != "" {
+		t.Fatalf("expected first job to inherit default profile without per-job key material, got %#v", cfg.Jobs[0])
 	}
 	if cfg.Jobs[0].Prompt != "Write a concise daily learning note." || cfg.Jobs[0].MaxChars != 1200 {
 		t.Fatalf("unexpected ai_email fields: %#v", cfg.Jobs[0])
 	}
-	if got := cfg.Jobs[1].ResolvedLLM(); got.Provider != "openai" || got.Model != "gpt-4o-mini" || got.APIKeyEnv != "OPENAI_API_KEY" {
-		t.Fatalf("expected second job to use per-job llm override, got %#v", got)
+	if got := cfg.Jobs[1].ResolvedLLM(); got.Name != "openai-cheap" || got.Provider != "openai" || got.Model != "gpt-4o-mini" || got.APIKeyEnv != "OPENAI_API_KEY" {
+		t.Fatalf("expected second job to use named profile override, got %#v", got)
+	}
+	if cfg.Jobs[1].LLMProfile != "openai-cheap" {
+		t.Fatalf("expected job to store only selected profile name, got %#v", cfg.Jobs[1])
 	}
 }
 
@@ -375,10 +385,13 @@ func TestReadRuntimeConfigRejectsAIEmailPromptAndMaxCharsErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
 	}
-	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `llm:
-  provider: openrouter
-  model: openai/gpt-4o-mini
-  api_key_env: OPENROUTER_API_KEY
+	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `llms:
+  default: openrouter
+  profiles:
+    - name: openrouter
+      provider: openrouter
+      model: openai/gpt-4o-mini
+      api_key_env: OPENROUTER_API_KEY
 jobs:
   - name: daily-ai-email
     type: ai_email

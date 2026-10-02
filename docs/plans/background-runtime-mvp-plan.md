@@ -895,20 +895,27 @@ Live verification may use the dedicated agent Google account by forcing an expir
 
 ### Objective
 
-Add an `ai_email` job type that can be run manually or by the daemon. The job should resolve a default top-level LLM config, allow per-job provider/model overrides, generate bounded text from a configured prompt, and deliver that text through the already-configured notifier.
+Add an `ai_email` job type that can be run manually or by the daemon. The job should resolve a default named LLM profile, allow per-job profile selection, generate bounded text from a configured prompt, and deliver that text through the already-configured notifier.
 
 ### Scope
 
-- Add safe top-level LLM config, conceptually:
+- Add safe named LLM profile config with a default profile, conceptually:
 
   ```yaml
-  llm:
-    provider: openrouter
-    model: openai/gpt-4o-mini
-    api_key_env: OPENROUTER_API_KEY
+  llms:
+    default: openrouter-default
+    profiles:
+      - name: openrouter-default
+        provider: openrouter
+        model: openai/gpt-4o-mini
+        api_key_env: OPENROUTER_API_KEY
+      - name: openai-cheap
+        provider: openai
+        model: gpt-4o-mini
+        api_key_env: OPENAI_API_KEY
   ```
 
-- Add per-job LLM override support, conceptually:
+- Add per-job LLM profile selection by name, conceptually:
 
   ```yaml
   jobs:
@@ -924,14 +931,11 @@ Add an `ai_email` job type that can be run manually or by the daemon. The job sh
       interval_seconds: 604800
       prompt: "Write a practical software engineering tip."
       max_chars: 1500
-      llm:
-        provider: openai
-        model: gpt-4o-mini
-        api_key_env: OPENAI_API_KEY
+      llm_profile: openai-cheap
   ```
 
-- Resolve LLM settings as: per-job `llm:` override first, top-level `llm:` default second.
-- Keep raw API keys out of YAML; config may reference environment variable names or later secret-file paths only.
+- Resolve LLM settings as: per-job `llm_profile` selector first, default profile second.
+- Keep raw API keys out of YAML job entries; LLM profiles may reference environment variable names or later secret-file paths only.
 - Add a small fake-testable LLM client/interface for job execution.
 - Bound generated content with `max_chars` before delivery.
 - Send generated content through the existing notifier interface, so Gmail/file-outbox behavior stays shared.
@@ -943,10 +947,10 @@ Add an `ai_email` job type that can be run manually or by the daemon. The job sh
 
 Add deterministic tests for:
 
-- top-level LLM config parsing and validation;
-- per-job LLM override parsing and resolution;
-- `ai_email` uses the global default when no job override is provided;
-- `ai_email` uses the per-job provider/model when configured;
+- named LLM profile config parsing and validation;
+- per-job `llm_profile` selector parsing and resolution;
+- `ai_email` uses the default profile when no job profile is selected;
+- `ai_email` uses the selected named profile when configured;
 - missing usable LLM config fails clearly for `ai_email` jobs;
 - fake LLM output is bounded by `max_chars`;
 - notifier receives the bounded generated content;

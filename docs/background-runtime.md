@@ -138,15 +138,22 @@ The Gmail notifier requires a local Google token file with the `https://www.goog
 
 ### AI email jobs
 
-The `ai_email` job type generates bounded email body content with a configured LLM, then sends it through the same notifier path used by `notify_test`. It supports a top-level default LLM config plus per-job overrides.
+The `ai_email` job type generates bounded email body content with a configured LLM, then sends it through the same notifier path used by `notify_test`. It supports multiple named LLM profiles, a default profile, and a per-job `llm_profile` selector when a job should use something other than the default.
 
-Example with a global default provider/model:
+Example with multiple connected providers and a default profile:
 
 ```yaml
-llm:
-  provider: openrouter
-  model: "openai/gpt-4o-mini"
-  api_key_env: OPENROUTER_API_KEY
+llms:
+  default: openrouter-default
+  profiles:
+    - name: openrouter-default
+      provider: openrouter
+      model: "openai/gpt-4o-mini"
+      api_key_env: OPENROUTER_API_KEY
+    - name: openai-cheap
+      provider: openai
+      model: "gpt-4o-mini"
+      api_key_env: OPENAI_API_KEY
 notifier:
   type: gmail
   gmail:
@@ -163,7 +170,7 @@ jobs:
     max_chars: 1200
 ```
 
-A job can override the provider/model/key source for that job only:
+A job can select a non-default profile by name without repeating provider/model/key settings:
 
 ```yaml
 jobs:
@@ -173,13 +180,10 @@ jobs:
     interval_seconds: 604800
     prompt: "Write a practical software engineering tip."
     max_chars: 1500
-    llm:
-      provider: openai
-      model: "gpt-4o-mini"
-      api_key_env: OPENAI_API_KEY
+    llm_profile: openai-cheap
 ```
 
-`api_key_env` names an environment variable; raw API keys must not be stored in `config/config.yaml`. `provider` currently supports `openrouter`, `openai`, or `openai_compatible` with `base_url`. Job state records success/failure metadata only; it does not store the prompt, generated email body, API key, or raw provider response.
+`api_key_env` names an environment variable in an LLM profile; raw API keys must not be stored in `config/config.yaml`, and job entries should only reference profile names. `provider` currently supports `openrouter`, `openai`, or `openai_compatible` with `base_url`. Job state records success/failure metadata only; it does not store the prompt, generated email body, API key, or raw provider response.
 
 ## Inspect and manually run jobs
 
