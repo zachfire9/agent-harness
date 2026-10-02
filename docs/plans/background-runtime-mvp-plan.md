@@ -1037,10 +1037,91 @@ Live verification should send at most one or two smoke-test emails, then restore
 
 ---
 
-## Step 13 — Google Docs read-only source adapter
+## Step 13 — Automated GitHub release binaries
 
 - **Status:** Planned
-- **Branch:** `step-33-google-docs-source`
+- **Branch:** `step-33-automated-release-binaries`
+- **Pull Request:** TBD
+- **Concept:** Once the LLM email functionality works end-to-end, publish the first versioned app binary so installs can use downloaded release artifacts instead of a source checkout and local `go build`.
+
+### Objective
+
+Add an automated GitHub release workflow that turns a version tag into downloadable, checksum-verified release assets for Linux installs. Use this to create the first app version after the `ai_email` job and local background-service smoke path are working.
+
+### Scope
+
+- Add a GitHub Actions release workflow, conceptually:
+
+  ```text
+  .github/workflows/release.yml
+  ```
+
+- Trigger release publishing from version tags such as:
+
+  ```text
+  v0.1.0
+  ```
+
+- Run the test suite before publishing assets:
+
+  ```bash
+  go test ./...
+  ```
+
+- Build at least the first Linux targets:
+
+  ```text
+  linux/amd64
+  linux/arm64
+  ```
+
+- Package artifacts using the existing release shape, conceptually:
+
+  ```text
+  agent-harness_0.1.0_linux_amd64.tar.gz
+  agent-harness_0.1.0_linux_arm64.tar.gz
+  checksums.txt
+  ```
+
+- Embed version metadata from the tag, commit, build date, and dirty state.
+- Upload release archives and `checksums.txt` as GitHub Release assets.
+- Document the install/update flow as: download artifact, verify checksum, install binary, verify `agent-harness version`.
+- Keep generated `dist/` artifacts out of git.
+- Do not add self-update yet.
+- Do not require macOS/Windows release artifacts in this first automated release step.
+
+### Tests
+
+Add deterministic/reviewable verification for:
+
+- release workflow exists and is tag-triggered;
+- release script/workflow uses the expected Linux targets;
+- generated archive names/checksum docs match the documented install commands;
+- version metadata is embedded in built binaries;
+- `dist/` remains uncommitted/ignored;
+- install docs do not contain machine-specific paths, tokens, or private URLs.
+
+### Verification
+
+```bash
+go test ./...
+scripts/build-release.sh 0.1.0
+sha256sum -c dist/checksums.txt
+```
+
+After merge, live release verification should create a tag such as `v0.1.0`, confirm GitHub Actions publishes release assets, then install from the downloaded Linux asset on the agent machine and verify:
+
+```bash
+agent-harness version
+agent-harness status --instance default --json
+```
+
+---
+
+## Step 14 — Google Docs read-only source adapter
+
+- **Status:** Planned
+- **Branch:** `step-34-google-docs-source`
 - **Pull Request:** TBD
 - **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.
 
@@ -1092,10 +1173,10 @@ Live verification should use a test/shared document with non-sensitive content f
 
 ---
 
-## Step 14 — First Google-backed scheduled digest job
+## Step 15 — First Google-backed scheduled digest job
 
 - **Status:** Planned
-- **Branch:** `step-34-google-doc-digest-job`
+- **Branch:** `step-35-google-doc-digest-job`
 - **Pull Request:** TBD
 - **Concept:** Combine the scheduler, Google Docs source adapter, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
 
@@ -1220,7 +1301,7 @@ Use these decisions when implementing Step 01:
 
 ## Suggested next scope after Step 07
 
-After Step 07, continue with Google integration in thin, security-first slices instead of jumping straight to a full daily brief, broad account access, Telegram, AWS, or model calls:
+After Step 07, continue with Google integration and release packaging in thin, security-first slices instead of jumping straight to a full daily brief, broad account access, Telegram, AWS, or model calls:
 
 ```text
 Step 08 — Google OAuth account connection and secret-safe status
@@ -1228,8 +1309,9 @@ Step 09 — Gmail notifier delivery adapter
 Step 10 — Google OAuth token refresh for Google-backed actions
 Step 11 — Configurable LLM settings and AI email job
 Step 12 — Local background service for scheduled AI email
-Step 13 — Google Docs read-only source adapter
-Step 14 — First Google-backed scheduled digest job
+Step 13 — Automated GitHub release binaries
+Step 14 — Google Docs read-only source adapter
+Step 15 — First Google-backed scheduled digest job
 ```
 
-That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, one bounded AI-generated email job, and deterministic source/digest behavior before adding richer daily-brief content, rotations, enrichment, broad scopes, or alternate delivery channels.
+That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, one bounded AI-generated email job, a downloadable first app version, and deterministic source/digest behavior before adding richer daily-brief content, rotations, enrichment, broad scopes, or alternate delivery channels.
