@@ -791,7 +791,7 @@ For live manual OAuth verification, use a throwaway/test Google account or the d
 
 ## Step 09 — Gmail notifier delivery adapter
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-29-gmail-notifier`
 - **Pull Request:** TBD
 - **Concept:** Once Google auth is observable and revocable, add the first real network notifier by adapting the existing delivery interface to Gmail send-only delivery.

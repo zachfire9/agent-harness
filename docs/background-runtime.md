@@ -91,11 +91,12 @@ jobs:
 
 Each JSONL record includes the job name, timestamp, message, and success status. Job status points to the output file path but does not dump the file contents.
 
-### Notification test jobs and file outbox delivery
+### Notification test jobs and notifier delivery
 
-The `notify_test` job type exercises the first delivery adapter without adding email, Telegram, Google, model calls, or daily-brief content. It sends a configured message through a small notifier interface. The only built-in notifier for now is a local file outbox under the instance home.
+The `notify_test` job type exercises the delivery adapter path without adding Telegram, Google Docs, model calls, or daily-brief content. It sends a configured message through a small notifier interface.
 
-Example:
+The safe default notifier is a local file outbox under the instance home:
+
 ```yaml
 jobs:
   - name: notify-test
@@ -109,6 +110,31 @@ jobs:
 `message` defaults to `agent-harness notification test` when omitted. `outbox_path` defaults to `work/outbox.jsonl` and must be a relative path that stays inside the instance home.
 
 Each outbox JSONL record includes the job name, timestamp, message, and `transport: "file_outbox"`. Job status points to the outbox path but does not dump message contents into `jobs list` output. Delivery failures are recorded in `state/jobs.json` as failed job state with `last_error`.
+
+A Gmail send-only notifier can also back the same `notify_test` job when Google auth is configured with the narrow `gmail_send` scope:
+
+```yaml
+google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scope_profile: "gmail_send"
+notifier:
+  type: gmail
+  gmail:
+    from: "agent@example.com"
+    to:
+      - "operator@example.com"
+    subject_prefix: "[agent-harness]"
+jobs:
+  - name: notify-test
+    type: notify_test
+    enabled: true
+    interval_seconds: 3600
+    message: "delivery adapter works"
+```
+
+The Gmail notifier requires a local Google token file with the `https://www.googleapis.com/auth/gmail.send` scope. It sends compact MIME content through the Gmail API and stores only safe delivery state/errors in `state/jobs.json`; it must not print OAuth token values or raw API responses.
 
 ## Inspect and manually run jobs
 
@@ -149,7 +175,7 @@ google:
 
 Supported narrow scope profiles:
 
-- `gmail_send`: requests `https://www.googleapis.com/auth/gmail.send` for a future Gmail notifier.
+- `gmail_send`: requests `https://www.googleapis.com/auth/gmail.send` for the Gmail notifier.
 - `docs_readonly`: requests `https://www.googleapis.com/auth/documents.readonly` for a future Google Docs source adapter.
 
 `agent-harness init` creates `config/secrets/` with restricted directory permissions. Store Google client credentials and token files there with `0600` file permissions. These files are local secrets and must not be committed.

@@ -20,11 +20,25 @@ type JobConfig struct {
 	Message    string
 	OutputPath string
 	OutboxPath string
+	Notifier   NotifierConfig
+	Google     GoogleConfig
 }
 
 type RuntimeConfig struct {
-	Jobs   []JobConfig
-	Google GoogleConfig
+	Jobs     []JobConfig
+	Google   GoogleConfig
+	Notifier NotifierConfig
+}
+
+type NotifierConfig struct {
+	Type  string
+	Gmail GmailNotifierConfig
+}
+
+type GmailNotifierConfig struct {
+	From          string
+	To            []string
+	SubjectPrefix string
 }
 
 func DefaultRuntimeConfig() RuntimeConfig {
@@ -48,26 +62,36 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	}
 	defer file.Close()
 
-	parsedJobs, googleConfig, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
+	parsedJobs, googleConfig, notifierConfig, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
 	cfg.Google = googleConfig
+	cfg.Notifier = notifierConfig
 	if sawJobs {
 		cfg.Jobs = parsedJobs
 	} else if legacyInterval > 0 {
 		cfg.Jobs[0].Interval = legacyInterval
 	}
+	cfg.attachNotifierToJobs()
 	if err := validateRuntimeConfig(cfg); err != nil {
 		return RuntimeConfig{}, err
 	}
 	return cfg, nil
 }
 
-func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, bool, time.Duration, error) {
+func (cfg *RuntimeConfig) attachNotifierToJobs() {
+	for i := range cfg.Jobs {
+		cfg.Jobs[i].Notifier = cfg.Notifier
+		cfg.Jobs[i].Google = cfg.Google
+	}
+}
+
+func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, bool, time.Duration, error) {
 	var jobs []JobConfig
 	var current *JobConfig
 	var google GoogleConfig
+	var notifier NotifierConfig
 	var sawJobs bool
 	var legacyInterval time.Duration
 	var section string
@@ -83,12 +107,27 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, bool, time.Du
 			section = "google"
 			continue
 		}
+		if line == "notifier:" {
+			section = "notifier"
+			continue
+		}
+		if line == "gmail:" && strings.HasPrefix(section, "notifier") {
+			section = "notifier.gmail"
+			continue
+		}
 		if line == "jobs:" {
 			section = "jobs"
 			sawJobs = true
 			continue
 		}
 		if strings.HasPrefix(line, "- ") {
+			if section == "notifier.gmail.to" {
+				recipient := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "- ")), `"'`)
+				if recipient != "" {
+					notifier.Gmail.To = append(notifier.Gmail.To, recipient)
+				}
+				continue
+			}
 			if section != "jobs" {
 				continue
 			}
@@ -111,7 +150,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, bool, time.Du
 		if !sawJobs && key == "heartbeat_job_interval_seconds" {
 			seconds, err := parsePositiveSeconds(value, "heartbeat_job_interval_seconds")
 			if err != nil {
-				return nil, GoogleConfig{}, false, 0, err
+				return nil, GoogleConfig{}, NotifierConfig{}, false, 0, err
 			}
 			legacyInterval = seconds
 			continue
@@ -129,6 +168,22 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, bool, time.Du
 			}
 			continue
 		}
+		if strings.HasPrefix(section, "notifier") {
+			switch key {
+			case "type":
+				notifier.Type = value
+			case "from":
+				notifier.Gmail.From = value
+			case "to":
+				section = "notifier.gmail.to"
+				if value != "" {
+					notifier.Gmail.To = append(notifier.Gmail.To, value)
+				}
+			case "subject_prefix":
+				notifier.Gmail.SubjectPrefix = value
+			}
+			continue
+		}
 		if section != "jobs" || !sawJobs || current == nil {
 			continue
 		}
@@ -140,13 +195,13 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, bool, time.Du
 		case "enabled":
 			enabled, err := strconv.ParseBool(value)
 			if err != nil {
-				return nil, google, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
+				return nil, google, notifier, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
 			}
 			current.Enabled = enabled
 		case "interval_seconds":
 			interval, err := parsePositiveSeconds(value, "interval_seconds")
 			if err != nil {
-				return nil, google, true, 0, err
+				return nil, google, notifier, true, 0, err
 			}
 			current.Interval = interval
 		case "message":
@@ -158,12 +213,12 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, bool, time.Du
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, google, sawJobs, legacyInterval, err
+		return nil, google, notifier, sawJobs, legacyInterval, err
 	}
 	if current != nil {
 		jobs = append(jobs, *current)
 	}
-	return jobs, google, sawJobs, legacyInterval, nil
+	return jobs, google, notifier, sawJobs, legacyInterval, nil
 }
 
 func parsePositiveSeconds(value, field string) (time.Duration, error) {
@@ -176,6 +231,9 @@ func parsePositiveSeconds(value, field string) (time.Duration, error) {
 
 func validateRuntimeConfig(cfg RuntimeConfig) error {
 	if err := cfg.Google.Validate(); err != nil {
+		return err
+	}
+	if err := validateNotifierConfig(cfg.Notifier, cfg.Google); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -205,6 +263,31 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 		}
 	}
 	return nil
+}
+
+func validateNotifierConfig(notifier NotifierConfig, google GoogleConfig) error {
+	switch notifier.Type {
+	case "", "file_outbox":
+		return nil
+	case "gmail":
+		if google.ScopeProfile != GoogleScopeProfileGmailSend {
+			return fmt.Errorf("gmail notifier requires google scope_profile gmail_send")
+		}
+		if strings.TrimSpace(notifier.Gmail.From) == "" {
+			return fmt.Errorf("gmail notifier from is required")
+		}
+		if len(notifier.Gmail.To) == 0 {
+			return fmt.Errorf("gmail notifier to is required")
+		}
+		for _, recipient := range notifier.Gmail.To {
+			if strings.TrimSpace(recipient) == "" {
+				return fmt.Errorf("gmail notifier to contains empty recipient")
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown notifier type %q", notifier.Type)
+	}
 }
 
 func validateInstanceRelativePath(path string) error {

@@ -160,13 +160,20 @@ func localCheckinOutputPath(cfg JobConfig) string {
 type notifyTestJob struct{}
 
 func (notifyTestJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
-	return runNotifyTestWithNotifier(paths, now, cfg, fileOutboxNotifier{paths: paths, outboxPath: notifyTestOutboxPath(cfg)})
+	return runNotifyTestWithNotifier(paths, now, cfg, notifierForJob(paths, cfg))
+}
+
+func notifierForJob(paths Paths, cfg JobConfig) Notifier {
+	if cfg.Notifier.Type == "gmail" {
+		return gmailNotifier{paths: paths, google: cfg.Google, config: cfg.Notifier.Gmail}
+	}
+	return fileOutboxNotifier{paths: paths, outboxPath: notifyTestOutboxPath(cfg)}
 }
 
 func runNotifyTestWithNotifier(paths Paths, now time.Time, cfg JobConfig, notifier Notifier) (JobState, error) {
 	message := Message{Job: cfg.Name, Body: notifyTestMessage(cfg), Timestamp: now.UTC()}
 	if err := notifier.Send(context.Background(), message); err != nil {
-		return JobState{OutputPath: notifyTestOutboxPath(cfg)}, err
+		return JobState{OutputPath: notifyTestStateOutputPath(cfg)}, err
 	}
 	return JobState{
 		Name:          cfg.Name,
@@ -176,7 +183,7 @@ func runNotifyTestWithNotifier(paths Paths, now time.Time, cfg JobConfig, notifi
 		LastSuccessAt: now.UTC(),
 		LastError:     "",
 		NextRunAt:     now.Add(cfg.Interval).UTC(),
-		OutputPath:    notifyTestOutboxPath(cfg),
+		OutputPath:    notifyTestStateOutputPath(cfg),
 	}, nil
 }
 
@@ -192,6 +199,13 @@ func notifyTestOutboxPath(cfg JobConfig) string {
 		return "work/outbox.jsonl"
 	}
 	return filepath.ToSlash(filepath.Clean(cfg.OutboxPath))
+}
+
+func notifyTestStateOutputPath(cfg JobConfig) string {
+	if cfg.Notifier.Type == "gmail" {
+		return ""
+	}
+	return notifyTestOutboxPath(cfg)
 }
 
 type fileOutboxNotifier struct {
@@ -242,6 +256,7 @@ func defaultJobRegistry() map[string]Job {
 }
 
 func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
+	cfg.attachNotifierToJobs()
 	jobsState, err := readJobsStateOrEmpty(paths.JobsPath)
 	if err != nil {
 		return err
@@ -270,6 +285,7 @@ func RunConfiguredJobNow(paths Paths, cfg RuntimeConfig, name string, now time.T
 }
 
 func runConfiguredJobNowWithRegistry(paths Paths, cfg RuntimeConfig, name string, now time.Time, registry map[string]Job) (JobState, error) {
+	cfg.attachNotifierToJobs()
 	jobCfg, ok := findJobConfig(cfg, name)
 	if !ok {
 		return JobState{}, fmt.Errorf("unknown job %q", name)
@@ -356,7 +372,7 @@ func failedJobState(jobCfg JobConfig, now time.Time, err error) JobState {
 	if jobCfg.Type == "local_checkin" || jobCfg.Type == "notify_test" {
 		state.OutputPath = localCheckinOutputPath(jobCfg)
 		if jobCfg.Type == "notify_test" {
-			state.OutputPath = notifyTestOutboxPath(jobCfg)
+			state.OutputPath = notifyTestStateOutputPath(jobCfg)
 		}
 	}
 	return state
