@@ -21,6 +21,9 @@ func InitInstance(paths Paths) error {
 			return err
 		}
 	}
+	if err := os.MkdirAll(filepath.Join(paths.ConfigDir, "secrets"), 0o700); err != nil {
+		return err
+	}
 	configPath := filepath.Join(paths.ConfigDir, "config.yaml")
 	if _, err := os.Stat(configPath); err == nil {
 		return nil

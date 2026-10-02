@@ -23,7 +23,8 @@ type JobConfig struct {
 }
 
 type RuntimeConfig struct {
-	Jobs []JobConfig
+	Jobs   []JobConfig
+	Google GoogleConfig
 }
 
 func DefaultRuntimeConfig() RuntimeConfig {
@@ -47,12 +48,13 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	}
 	defer file.Close()
 
-	parsed, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
+	parsedJobs, googleConfig, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
+	cfg.Google = googleConfig
 	if sawJobs {
-		cfg.Jobs = parsed
+		cfg.Jobs = parsedJobs
 	} else if legacyInterval > 0 {
 		cfg.Jobs[0].Interval = legacyInterval
 	}
@@ -62,11 +64,13 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	return cfg, nil
 }
 
-func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error) {
+func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, bool, time.Duration, error) {
 	var jobs []JobConfig
 	var current *JobConfig
+	var google GoogleConfig
 	var sawJobs bool
 	var legacyInterval time.Duration
+	var section string
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -75,11 +79,19 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if line == "google:" {
+			section = "google"
+			continue
+		}
 		if line == "jobs:" {
+			section = "jobs"
 			sawJobs = true
 			continue
 		}
 		if strings.HasPrefix(line, "- ") {
+			if section != "jobs" {
+				continue
+			}
 			if current != nil {
 				jobs = append(jobs, *current)
 			}
@@ -99,12 +111,25 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error)
 		if !sawJobs && key == "heartbeat_job_interval_seconds" {
 			seconds, err := parsePositiveSeconds(value, "heartbeat_job_interval_seconds")
 			if err != nil {
-				return nil, false, 0, err
+				return nil, GoogleConfig{}, false, 0, err
 			}
 			legacyInterval = seconds
 			continue
 		}
-		if !sawJobs || current == nil {
+		if section == "google" {
+			switch key {
+			case "client_credentials_path":
+				google.ClientCredentialsPath = value
+			case "token_path":
+				google.TokenPath = value
+			case "account_hint":
+				google.AccountHint = value
+			case "scope_profile":
+				google.ScopeProfile = value
+			}
+			continue
+		}
+		if section != "jobs" || !sawJobs || current == nil {
 			continue
 		}
 		switch key {
@@ -115,13 +140,13 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error)
 		case "enabled":
 			enabled, err := strconv.ParseBool(value)
 			if err != nil {
-				return nil, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
+				return nil, google, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
 			}
 			current.Enabled = enabled
 		case "interval_seconds":
 			interval, err := parsePositiveSeconds(value, "interval_seconds")
 			if err != nil {
-				return nil, true, 0, err
+				return nil, google, true, 0, err
 			}
 			current.Interval = interval
 		case "message":
@@ -133,12 +158,12 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, bool, time.Duration, error)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, sawJobs, legacyInterval, err
+		return nil, google, sawJobs, legacyInterval, err
 	}
 	if current != nil {
 		jobs = append(jobs, *current)
 	}
-	return jobs, sawJobs, legacyInterval, nil
+	return jobs, google, sawJobs, legacyInterval, nil
 }
 
 func parsePositiveSeconds(value, field string) (time.Duration, error) {
@@ -150,6 +175,9 @@ func parsePositiveSeconds(value, field string) (time.Duration, error) {
 }
 
 func validateRuntimeConfig(cfg RuntimeConfig) error {
+	if err := cfg.Google.Validate(); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for i, job := range cfg.Jobs {
 		if strings.TrimSpace(job.Name) == "" {

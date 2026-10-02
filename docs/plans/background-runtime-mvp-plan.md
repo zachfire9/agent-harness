@@ -728,9 +728,9 @@ agent-harness jobs list --instance default
 
 ## Step 08 — Google OAuth account connection and secret-safe status
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-28-google-oauth-connection`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/30
 - **Concept:** Before adding Gmail or Google Docs behavior, give each instance a secure, inspectable way to connect a Google account with minimum necessary OAuth scopes and without leaking tokens into config, status, logs, docs, or PRs.
 
 ### Objective
