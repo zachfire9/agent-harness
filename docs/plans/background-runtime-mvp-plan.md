@@ -844,10 +844,52 @@ Live verification should send one test email to a configured operator address, t
 
 ---
 
-## Step 10 — Google Docs read-only source adapter
+## Step 10 — Google OAuth token refresh for Google-backed actions
+
+- **Status:** Completed
+- **Branch:** `step-30-google-token-refresh`
+- **Pull Request:** TBD
+- **Concept:** Before adding more Google API consumers, make Google-backed actions refresh expired access tokens safely using the saved refresh token and configured client credentials.
+
+### Objective
+
+Add shared Google token-refresh plumbing that can be reused by Gmail and future Google Docs access, so scheduled/manual Google-backed jobs do not fail merely because the short-lived access token expired.
+
+### Scope
+
+- Detect expired or nearly expired access tokens before a Google API call.
+- Use the saved refresh token plus configured OAuth client credentials to call Google's token endpoint.
+- Rewrite the local token file with the fresh access token, updated expiry, preserved refresh token, and scopes.
+- Wire the Gmail notifier through the shared helper so `notify_test` can send after a token refresh.
+- Keep errors secret-safe and status-only; never print access tokens, refresh tokens, client secrets, raw token endpoint responses, or email bodies.
+- Do not add Google Docs reading, daily brief content, model calls, Telegram delivery, or a broader OAuth scope profile in this step.
+
+### Tests
+
+Add deterministic tests for:
+
+- expired token with refresh token calls a fake token endpoint before Gmail send;
+- token refresh request uses expected OAuth form fields;
+- refreshed access token is used for the Gmail API request;
+- token file is rewritten with the fresh access token while preserving the refresh token;
+- expired token without refresh token returns a controlled safe error.
+
+### Verification
+
+```bash
+go test ./...
+go build -o /tmp/agent-harness-step10 ./cmd/agent-harness
+agent-harness jobs run notify-test --instance default
+```
+
+Live verification may use the dedicated agent Google account by forcing an expired local access token with a valid refresh token, then confirming one Gmail `notify_test` send succeeds after refresh without exposing token values.
+
+---
+
+## Step 11 — Google Docs read-only source adapter
 
 - **Status:** Planned
-- **Branch:** `step-30-google-docs-source`
+- **Branch:** `step-31-google-docs-source`
 - **Pull Request:** TBD
 - **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.
 
@@ -899,10 +941,10 @@ Live verification should use a test/shared document with non-sensitive content f
 
 ---
 
-## Step 11 — First Google-backed scheduled digest job
+## Step 12 — First Google-backed scheduled digest job
 
 - **Status:** Planned
-- **Branch:** `step-31-google-doc-digest-job`
+- **Branch:** `step-32-google-doc-digest-job`
 - **Pull Request:** TBD
 - **Concept:** Combine the scheduler, Google Docs source adapter, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
 
@@ -1032,8 +1074,9 @@ After Step 07, continue with Google integration in thin, security-first slices i
 ```text
 Step 08 — Google OAuth account connection and secret-safe status
 Step 09 — Gmail notifier delivery adapter
-Step 10 — Google Docs read-only source adapter
-Step 11 — First Google-backed scheduled digest job
+Step 10 — Google OAuth token refresh for Google-backed actions
+Step 11 — Google Docs read-only source adapter
+Step 12 — First Google-backed scheduled digest job
 ```
 
 That sequence keeps the next PRs focused on minimum necessary access, revocable OAuth credentials, observable external delivery, and deterministic source/digest behavior before adding richer content, rotations, enrichment, or model polish.
