@@ -668,12 +668,64 @@ func TestRunNotifyTestJobWithGmailNotifierRecordsSafeMissingTokenError(t *testin
 	}
 }
 
-func TestGmailNotifierRejectsExpiredToken(t *testing.T) {
+func TestGmailNotifierRefreshesExpiredTokenBeforeSending(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
 	}
-	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-token.json", `{"access_token":"ya29.test-token","scope":"https://www.googleapis.com/auth/gmail.send","expiry":"2000-01-02T03:04:05Z"}`)
+	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-token.json", `{"access_token":"ya29.expired-token","refresh_token":"refresh-token","scope":"https://www.googleapis.com/auth/gmail.send","expiry":"2000-01-02T03:04:05Z"}`)
+	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-client.json", `{"installed":{"client_id":"client-id","client_secret":"client-secret"}}`)
+	var gotTokenRefresh bool
+	var gotSendAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			gotTokenRefresh = true
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse token refresh form: %v", err)
+			}
+			if r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != "refresh-token" || r.Form.Get("client_id") != "client-id" || r.Form.Get("client_secret") != "client-secret" {
+				t.Fatalf("unexpected refresh form: %#v", r.Form)
+			}
+			fmt.Fprintln(w, `{"access_token":"ya29.fresh-token","expires_in":3600,"scope":"https://www.googleapis.com/auth/gmail.send"}`)
+		case "/gmail/v1/users/me/messages/send":
+			gotSendAuth = r.Header.Get("Authorization")
+			fmt.Fprintln(w, `{"id":"gmail-message-id"}`)
+		default:
+			t.Fatalf("unexpected request path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	notifier := gmailNotifier{
+		paths:         paths,
+		google:        GoogleConfig{ClientCredentialsPath: "config/secrets/google-client.json", TokenPath: "config/secrets/google-token.json", ScopeProfile: "gmail_send"},
+		config:        GmailNotifierConfig{From: "agent@example.com", To: []string{"operator@example.com"}},
+		endpoint:      server.URL,
+		oauthEndpoint: server.URL + "/token",
+		client:        server.Client(),
+	}
+
+	if err := notifier.Send(context.Background(), Message{Job: "notify-test", Body: "hello", Timestamp: time.Now()}); err != nil {
+		t.Fatalf("gmail send failed after refresh: %v", err)
+	}
+	if !gotTokenRefresh || gotSendAuth != "Bearer ya29.fresh-token" {
+		t.Fatalf("expected refresh then send with fresh token, refreshed=%t auth=%q", gotTokenRefresh, gotSendAuth)
+	}
+	raw, err := os.ReadFile(filepath.Join(paths.Home, "config", "secrets", "google-token.json"))
+	if err != nil {
+		t.Fatalf("read refreshed token: %v", err)
+	}
+	if strings.Contains(string(raw), "ya29.expired-token") || !strings.Contains(string(raw), "ya29.fresh-token") || !strings.Contains(string(raw), "refresh-token") {
+		t.Fatalf("expected token file to preserve refresh token and store fresh access token, got %s", string(raw))
+	}
+}
+
+func TestGmailNotifierFailsSafelyWhenExpiredTokenHasNoRefreshToken(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-token.json", `{"access_token":"ya29.expired-token","scope":"https://www.googleapis.com/auth/gmail.send","expiry":"2000-01-02T03:04:05Z"}`)
 	notifier := gmailNotifier{
 		paths:  paths,
 		google: GoogleConfig{TokenPath: "config/secrets/google-token.json", ScopeProfile: "gmail_send"},
@@ -681,8 +733,8 @@ func TestGmailNotifierRejectsExpiredToken(t *testing.T) {
 	}
 
 	err = notifier.Send(context.Background(), Message{Job: "notify-test", Body: "hello", Timestamp: time.Now()})
-	if err == nil || !strings.Contains(err.Error(), "google token is expired") {
-		t.Fatalf("expected expired token error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "google token cannot be refreshed") {
+		t.Fatalf("expected cannot refresh error, got %v", err)
 	}
 }
 

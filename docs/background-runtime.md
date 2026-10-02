@@ -134,7 +134,7 @@ jobs:
     message: "delivery adapter works"
 ```
 
-The Gmail notifier requires a local Google token file with the `https://www.googleapis.com/auth/gmail.send` scope. It sends compact MIME content through the Gmail API and stores only safe delivery state/errors in `state/jobs.json`; it must not print OAuth token values or raw API responses.
+The Gmail notifier requires a local Google token file with the `https://www.googleapis.com/auth/gmail.send` scope. If the access token is expired or close to expiry, the app uses the saved refresh token and configured client credentials to refresh it before sending, then rewrites the token file with the new access token and expiry. It sends compact MIME content through the Gmail API and stores only safe delivery state/errors in `state/jobs.json`; it must not print OAuth token values or raw API responses.
 
 ## Inspect and manually run jobs
 
@@ -198,7 +198,7 @@ Remove the local Google token file without deleting the client credentials file:
 agent-harness google auth revoke --instance default --confirm revoke-google-token
 ```
 
-The auth status/start commands may print safe metadata such as account hint, scope profile, requested scopes, token expiry, and configured paths. They must not print access tokens, refresh tokens, client secrets, authorization codes, or raw credential JSON. To fully revoke cloud-side access, also remove the app from the connected Google account's security settings.
+The auth status/start commands may print safe metadata such as account hint, scope profile, requested scopes, token expiry, and configured paths. They must not print access tokens, refresh tokens, client secrets, authorization codes, or raw credential JSON. Google-backed actions may refresh an expired access token using the saved refresh token and client credentials; refresh failures are reported with controlled status-only errors. To fully revoke cloud-side access, also remove the app from the connected Google account's security settings.
 
 ## Run a daemon smoke test
 
