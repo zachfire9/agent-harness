@@ -848,7 +848,7 @@ Live verification should send one test email to a configured operator address, t
 
 - **Status:** Completed
 - **Branch:** `step-30-google-token-refresh`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/32
 - **Concept:** Before adding more Google API consumers, make Google-backed actions refresh expired access tokens safely using the saved refresh token and configured client credentials.
 
 ### Objective
