@@ -136,6 +136,51 @@ jobs:
 
 The Gmail notifier requires a local Google token file with the `https://www.googleapis.com/auth/gmail.send` scope. If the access token is expired or close to expiry, the app uses the saved refresh token and configured client credentials to refresh it before sending, then rewrites the token file with the new access token and expiry. It sends compact MIME content through the Gmail API and stores only safe delivery state/errors in `state/jobs.json`; it must not print OAuth token values or raw API responses.
 
+### AI email jobs
+
+The `ai_email` job type generates bounded email body content with a configured LLM, then sends it through the same notifier path used by `notify_test`. It supports a top-level default LLM config plus per-job overrides.
+
+Example with a global default provider/model:
+
+```yaml
+llm:
+  provider: openrouter
+  model: "openai/gpt-4o-mini"
+  api_key_env: OPENROUTER_API_KEY
+notifier:
+  type: gmail
+  gmail:
+    from: "agent@example.com"
+    to:
+      - "operator@example.com"
+    subject_prefix: "[agent-harness]"
+jobs:
+  - name: daily-ai-email
+    type: ai_email
+    enabled: true
+    interval_seconds: 86400
+    prompt: "Write a concise daily learning note for Zach."
+    max_chars: 1200
+```
+
+A job can override the provider/model/key source for that job only:
+
+```yaml
+jobs:
+  - name: weekly-ai-email
+    type: ai_email
+    enabled: true
+    interval_seconds: 604800
+    prompt: "Write a practical software engineering tip."
+    max_chars: 1500
+    llm:
+      provider: openai
+      model: "gpt-4o-mini"
+      api_key_env: OPENAI_API_KEY
+```
+
+`api_key_env` names an environment variable; raw API keys must not be stored in `config/config.yaml`. `provider` currently supports `openrouter`, `openai`, or `openai_compatible` with `base_url`. Job state records success/failure metadata only; it does not store the prompt, generated email body, API key, or raw provider response.
+
 ## Inspect and manually run jobs
 
 List configured jobs without needing a long-running daemon:
@@ -153,6 +198,7 @@ Run a configured job immediately through the same registry used by the daemon:
 agent-harness jobs run heartbeat --instance default
 agent-harness jobs run daily-checkin --instance default
 agent-harness jobs run notify-test --instance default
+agent-harness jobs run daily-ai-email --instance default
 ```
 
 Manual runs update `state/jobs.json` just like scheduled daemon runs. Unknown jobs, disabled jobs, and invalid job config return controlled non-zero errors. The command does not require `systemd` or a background daemon, which makes it useful for debugging instance config before enabling the service.

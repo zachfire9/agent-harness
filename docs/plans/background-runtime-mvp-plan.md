@@ -888,7 +888,7 @@ Live verification may use the dedicated agent Google account by forcing an expir
 
 ## Step 11 — Configurable LLM settings and AI email job
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-31-ai-email-job`
 - **Pull Request:** TBD
 - **Concept:** Add the first model-backed scheduled job with safe global LLM defaults and per-job overrides, then send the bounded generated content through the existing notifier.
@@ -925,9 +925,9 @@ Add an `ai_email` job type that can be run manually or by the daemon. The job sh
       prompt: "Write a practical software engineering tip."
       max_chars: 1500
       llm:
-        provider: anthropic
-        model: claude-3-5-haiku-latest
-        api_key_env: ANTHROPIC_API_KEY
+        provider: openai
+        model: gpt-4o-mini
+        api_key_env: OPENAI_API_KEY
   ```
 
 - Resolve LLM settings as: per-job `llm:` override first, top-level `llm:` default second.

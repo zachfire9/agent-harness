@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zachfire9/agent-harness/internal/llm"
 	"github.com/zachfire9/agent-harness/internal/version"
 )
 
@@ -303,6 +304,95 @@ func TestReadRuntimeConfigRejectsNotifyTestOutboxOutsideInstanceHome(t *testing.
 	}
 }
 
+func TestReadRuntimeConfigParsesLLMDefaultsAndAIEmailOverrides(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `llm:
+  provider: openrouter
+  model: openai/gpt-4o-mini
+  api_key_env: OPENROUTER_API_KEY
+jobs:
+  - name: daily-ai-email
+    type: ai_email
+    enabled: true
+    interval_seconds: 86400
+    prompt: "Write a concise daily learning note."
+    max_chars: 1200
+  - name: weekly-ai-email
+    type: ai_email
+    enabled: true
+    interval_seconds: 604800
+    prompt: "Write a practical software engineering tip."
+    max_chars: 1500
+    llm:
+      provider: openai
+      model: gpt-4o-mini
+      api_key_env: OPENAI_API_KEY
+`)
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("expected config to parse, got %v", err)
+	}
+	if cfg.LLM.Provider != "openrouter" || cfg.LLM.Model != "openai/gpt-4o-mini" || cfg.LLM.APIKeyEnv != "OPENROUTER_API_KEY" {
+		t.Fatalf("unexpected top-level llm config: %#v", cfg.LLM)
+	}
+	if got := cfg.Jobs[0].ResolvedLLM(); got.Provider != "openrouter" || got.Model != "openai/gpt-4o-mini" || got.APIKeyEnv != "OPENROUTER_API_KEY" {
+		t.Fatalf("expected first job to use top-level llm default, got %#v", got)
+	}
+	if cfg.Jobs[0].Prompt != "Write a concise daily learning note." || cfg.Jobs[0].MaxChars != 1200 {
+		t.Fatalf("unexpected ai_email fields: %#v", cfg.Jobs[0])
+	}
+	if got := cfg.Jobs[1].ResolvedLLM(); got.Provider != "openai" || got.Model != "gpt-4o-mini" || got.APIKeyEnv != "OPENAI_API_KEY" {
+		t.Fatalf("expected second job to use per-job llm override, got %#v", got)
+	}
+}
+
+func TestReadRuntimeConfigRejectsAIEmailWithoutUsableLLMConfig(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `jobs:
+  - name: daily-ai-email
+    type: ai_email
+    enabled: true
+    interval_seconds: 86400
+    prompt: "Write a note."
+    max_chars: 1200
+`)
+
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), "ai_email job \"daily-ai-email\" requires llm provider") {
+		t.Fatalf("expected missing llm config error, got %v", err)
+	}
+}
+
+func TestReadRuntimeConfigRejectsAIEmailPromptAndMaxCharsErrors(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `llm:
+  provider: openrouter
+  model: openai/gpt-4o-mini
+  api_key_env: OPENROUTER_API_KEY
+jobs:
+  - name: daily-ai-email
+    type: ai_email
+    enabled: true
+    interval_seconds: 86400
+    max_chars: 0
+`)
+
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), "ai_email job \"daily-ai-email\" requires prompt") {
+		t.Fatalf("expected prompt validation error, got %v", err)
+	}
+}
+
 func TestReadRuntimeConfigParsesGmailNotifierConfig(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -552,6 +642,86 @@ func TestRunLocalCheckinJobRecordsWriteFailure(t *testing.T) {
 	}
 	if got := jobs.Jobs["daily-checkin"]; got.Status != JobFailed || got.LastError == "" || got.OutputPath != "work/blocked/checkins.jsonl" {
 		t.Fatalf("expected persisted failed checkin state, got %#v", got)
+	}
+}
+
+func TestRunAIEmailWithNotifierUsesFakeLLMAndBoundsOutput(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	notifier := &recordingNotifier{}
+	client := &recordingLLMClient{response: "0123456789abcdef"}
+	cfg := JobConfig{
+		Name:     "daily-ai-email",
+		Type:     "ai_email",
+		Enabled:  true,
+		Interval: time.Hour,
+		Prompt:   "Write one sentence.",
+		MaxChars: 12,
+		LLM:      LLMConfig{Provider: "openrouter", Model: "openai/gpt-4o-mini", APIKeyEnv: "OPENROUTER_API_KEY"},
+	}
+
+	state, err := runAIEmailWithClients(Paths{}, now, cfg, notifier, client)
+	if err != nil {
+		t.Fatalf("run ai email failed: %v", err)
+	}
+	if state.Status != JobSucceeded || state.LastError != "" {
+		t.Fatalf("unexpected state: %#v", state)
+	}
+	if len(notifier.messages) != 1 {
+		t.Fatalf("expected one notification, got %d", len(notifier.messages))
+	}
+	if notifier.messages[0].Body != "0123456789ab" {
+		t.Fatalf("expected bounded generated body, got %q", notifier.messages[0].Body)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("expected one LLM request, got %d", len(client.requests))
+	}
+	if client.requests[0].Model != "openai/gpt-4o-mini" {
+		t.Fatalf("expected configured model, got %q", client.requests[0].Model)
+	}
+	if got := client.requests[0].Messages[len(client.requests[0].Messages)-1].Content; got != "Write one sentence." {
+		t.Fatalf("expected prompt in request, got %q", got)
+	}
+}
+
+func TestRunConfiguredAIEmailRecordsSafeLLMFailure(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cfg := RuntimeConfig{Jobs: []JobConfig{{
+		Name:     "daily-ai-email",
+		Type:     "ai_email",
+		Enabled:  true,
+		Interval: time.Hour,
+		Prompt:   "Do not leak secrets.",
+		MaxChars: 100,
+		LLM:      LLMConfig{Provider: "openrouter", Model: "openai/gpt-4o-mini", APIKeyEnv: "SECRET_API_KEY"},
+	}}}
+	secretErr := errors.New("provider failed with api key *** and full provider body")
+	job := aiEmailJob{
+		clientFactory: func(cfg LLMConfig) (llm.ChatClient, error) {
+			return &recordingLLMClient{err: secretErr}, nil
+		},
+		notifierFactory: func(paths Paths, cfg JobConfig) Notifier {
+			return &recordingNotifier{}
+		},
+	}
+
+	state, err := runConfiguredJobNowWithRegistry(paths, cfg, "daily-ai-email", now, map[string]Job{"ai_email": job})
+	if err == nil || !strings.Contains(err.Error(), "llm generation failed") {
+		t.Fatalf("expected safe llm failure, got %v", err)
+	}
+	if strings.Contains(err.Error(), "***") || strings.Contains(state.LastError, "***") || strings.Contains(state.LastError, "full provider body") {
+		t.Fatalf("expected secret-safe error, got err=%v state=%#v", err, state)
+	}
+	jobs, err := ReadJobs(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read jobs: %v", err)
+	}
+	persisted := jobs.Jobs["daily-ai-email"]
+	if persisted.Status != JobFailed || persisted.LastError != "llm generation failed" {
+		t.Fatalf("expected persisted safe failure, got %#v", persisted)
 	}
 }
 
@@ -841,6 +1011,23 @@ func (r *recordingNotifier) Send(ctx context.Context, message Message) error {
 	}
 	r.messages = append(r.messages, message)
 	return nil
+}
+
+type recordingLLMClient struct {
+	requests []llm.ChatRequest
+	response string
+	err      error
+}
+
+func (c *recordingLLMClient) Chat(ctx context.Context, request llm.ChatRequest) (llm.ChatResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return llm.ChatResponse{}, err
+	}
+	c.requests = append(c.requests, request)
+	if c.err != nil {
+		return llm.ChatResponse{}, c.err
+	}
+	return llm.ChatResponse{Message: llm.Message{Role: llm.RoleAssistant, Content: c.response}}, nil
 }
 
 type failingJob struct {

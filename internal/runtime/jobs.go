@@ -3,11 +3,14 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zachfire9/agent-harness/internal/llm"
 )
 
 type JobStatus string
@@ -208,6 +211,87 @@ func notifyTestStateOutputPath(cfg JobConfig) string {
 	return notifyTestOutboxPath(cfg)
 }
 
+type aiEmailJob struct {
+	clientFactory   func(LLMConfig) (llm.ChatClient, error)
+	notifierFactory func(Paths, JobConfig) Notifier
+}
+
+func (job aiEmailJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
+	clientFactory := job.clientFactory
+	if clientFactory == nil {
+		clientFactory = newLLMClientForConfig
+	}
+	notifierFactory := job.notifierFactory
+	if notifierFactory == nil {
+		notifierFactory = notifierForJob
+	}
+	client, err := clientFactory(cfg.ResolvedLLM())
+	if err != nil {
+		return JobState{}, err
+	}
+	return runAIEmailWithClients(paths, now, cfg, notifierFactory(paths, cfg), client)
+}
+
+func runAIEmailWithClients(paths Paths, now time.Time, cfg JobConfig, notifier Notifier, client llm.ChatClient) (JobState, error) {
+	llmConfig := cfg.ResolvedLLM()
+	request := llm.NewChatRequest(llmConfig.Model,
+		llm.Message{Role: llm.RoleSystem, Content: "Generate concise email body content for a scheduled agent-harness notification. Return only the message body."},
+		llm.Message{Role: llm.RoleUser, Content: cfg.Prompt},
+	)
+	response, err := client.Chat(context.Background(), request)
+	if err != nil {
+		return JobState{}, errors.New("llm generation failed")
+	}
+	body := strings.TrimSpace(response.Message.Content)
+	if cfg.MaxChars > 0 && len(body) > cfg.MaxChars {
+		body = body[:cfg.MaxChars]
+	}
+	if body == "" {
+		return JobState{}, errors.New("llm generation returned empty content")
+	}
+	message := Message{Job: cfg.Name, Body: body, Timestamp: now.UTC()}
+	if err := notifier.Send(context.Background(), message); err != nil {
+		return JobState{}, err
+	}
+	return JobState{
+		Name:          cfg.Name,
+		Type:          cfg.Type,
+		Status:        JobSucceeded,
+		LastRunAt:     now.UTC(),
+		LastSuccessAt: now.UTC(),
+		LastError:     "",
+		NextRunAt:     now.Add(cfg.Interval).UTC(),
+	}, nil
+}
+
+func newLLMClientForConfig(cfg LLMConfig) (llm.ChatClient, error) {
+	apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv))
+	if apiKey == "" {
+		return nil, fmt.Errorf("llm api key env %q is not set", cfg.APIKeyEnv)
+	}
+	baseURL, err := llmBaseURL(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return llm.NewOpenAIClient(baseURL, apiKey), nil
+}
+
+func llmBaseURL(cfg LLMConfig) (string, error) {
+	if strings.TrimSpace(cfg.BaseURL) != "" {
+		return cfg.BaseURL, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
+	case "openrouter":
+		return "https://openrouter.ai/api/v1", nil
+	case "openai":
+		return "https://api.openai.com/v1", nil
+	case "openai_compatible":
+		return "", errors.New("llm provider openai_compatible requires base_url")
+	default:
+		return "", fmt.Errorf("unsupported llm provider %q", cfg.Provider)
+	}
+}
+
 type fileOutboxNotifier struct {
 	paths      Paths
 	outboxPath string
@@ -252,7 +336,7 @@ func (n fileOutboxNotifier) Send(ctx context.Context, message Message) error {
 }
 
 func defaultJobRegistry() map[string]Job {
-	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}, "notify_test": notifyTestJob{}}
+	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}, "notify_test": notifyTestJob{}, "ai_email": aiEmailJob{}}
 }
 
 func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {

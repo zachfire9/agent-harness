@@ -12,22 +12,41 @@ import (
 
 const defaultHeartbeatJobInterval = time.Minute
 
+type LLMConfig struct {
+	Provider  string
+	Model     string
+	APIKeyEnv string
+	BaseURL   string
+}
+
+func (c LLMConfig) IsZero() bool {
+	return strings.TrimSpace(c.Provider) == "" && strings.TrimSpace(c.Model) == "" && strings.TrimSpace(c.APIKeyEnv) == "" && strings.TrimSpace(c.BaseURL) == ""
+}
+
 type JobConfig struct {
 	Name       string
 	Type       string
 	Enabled    bool
 	Interval   time.Duration
 	Message    string
+	Prompt     string
+	MaxChars   int
 	OutputPath string
 	OutboxPath string
 	Notifier   NotifierConfig
 	Google     GoogleConfig
+	LLM        LLMConfig
+}
+
+func (job JobConfig) ResolvedLLM() LLMConfig {
+	return job.LLM
 }
 
 type RuntimeConfig struct {
 	Jobs     []JobConfig
 	Google   GoogleConfig
 	Notifier NotifierConfig
+	LLM      LLMConfig
 }
 
 type NotifierConfig struct {
@@ -62,12 +81,13 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	}
 	defer file.Close()
 
-	parsedJobs, googleConfig, notifierConfig, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
+	parsedJobs, googleConfig, notifierConfig, llmConfig, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
 	cfg.Google = googleConfig
 	cfg.Notifier = notifierConfig
+	cfg.LLM = llmConfig
 	if sawJobs {
 		cfg.Jobs = parsedJobs
 	} else if legacyInterval > 0 {
@@ -84,14 +104,18 @@ func (cfg *RuntimeConfig) attachNotifierToJobs() {
 	for i := range cfg.Jobs {
 		cfg.Jobs[i].Notifier = cfg.Notifier
 		cfg.Jobs[i].Google = cfg.Google
+		if cfg.Jobs[i].LLM.IsZero() {
+			cfg.Jobs[i].LLM = cfg.LLM
+		}
 	}
 }
 
-func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, bool, time.Duration, error) {
+func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, LLMConfig, bool, time.Duration, error) {
 	var jobs []JobConfig
 	var current *JobConfig
 	var google GoogleConfig
 	var notifier NotifierConfig
+	var llmConfig LLMConfig
 	var sawJobs bool
 	var legacyInterval time.Duration
 	var section string
@@ -105,6 +129,14 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		}
 		if line == "google:" {
 			section = "google"
+			continue
+		}
+		if line == "llm:" {
+			if section == "jobs" && current != nil && strings.HasPrefix(raw, "    ") {
+				section = "jobs.llm"
+			} else {
+				section = "llm"
+			}
 			continue
 		}
 		if line == "notifier:" {
@@ -128,9 +160,10 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				}
 				continue
 			}
-			if section != "jobs" {
+			if section != "jobs" && section != "jobs.llm" {
 				continue
 			}
+			section = "jobs"
 			if current != nil {
 				jobs = append(jobs, *current)
 			}
@@ -150,7 +183,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		if !sawJobs && key == "heartbeat_job_interval_seconds" {
 			seconds, err := parsePositiveSeconds(value, "heartbeat_job_interval_seconds")
 			if err != nil {
-				return nil, GoogleConfig{}, NotifierConfig{}, false, 0, err
+				return nil, GoogleConfig{}, NotifierConfig{}, LLMConfig{}, false, 0, err
 			}
 			legacyInterval = seconds
 			continue
@@ -166,6 +199,10 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			case "scope_profile":
 				google.ScopeProfile = value
 			}
+			continue
+		}
+		if section == "llm" {
+			parseLLMConfigField(&llmConfig, key, value)
 			continue
 		}
 		if strings.HasPrefix(section, "notifier") {
@@ -184,6 +221,10 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			}
 			continue
 		}
+		if section == "jobs.llm" {
+			parseLLMConfigField(&current.LLM, key, value)
+			continue
+		}
 		if section != "jobs" || !sawJobs || current == nil {
 			continue
 		}
@@ -195,17 +236,25 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		case "enabled":
 			enabled, err := strconv.ParseBool(value)
 			if err != nil {
-				return nil, google, notifier, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
+				return nil, google, notifier, llmConfig, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
 			}
 			current.Enabled = enabled
 		case "interval_seconds":
 			interval, err := parsePositiveSeconds(value, "interval_seconds")
 			if err != nil {
-				return nil, google, notifier, true, 0, err
+				return nil, google, notifier, llmConfig, true, 0, err
 			}
 			current.Interval = interval
 		case "message":
 			current.Message = value
+		case "prompt":
+			current.Prompt = value
+		case "max_chars":
+			maxChars, err := strconv.Atoi(value)
+			if err != nil {
+				return nil, google, notifier, llmConfig, true, 0, fmt.Errorf("invalid max_chars for job %q: %q", current.Name, value)
+			}
+			current.MaxChars = maxChars
 		case "output_path":
 			current.OutputPath = value
 		case "outbox_path":
@@ -213,12 +262,25 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, google, notifier, sawJobs, legacyInterval, err
+		return nil, google, notifier, llmConfig, sawJobs, legacyInterval, err
 	}
 	if current != nil {
 		jobs = append(jobs, *current)
 	}
-	return jobs, google, notifier, sawJobs, legacyInterval, nil
+	return jobs, google, notifier, llmConfig, sawJobs, legacyInterval, nil
+}
+
+func parseLLMConfigField(cfg *LLMConfig, key, value string) {
+	switch key {
+	case "provider":
+		cfg.Provider = value
+	case "model":
+		cfg.Model = value
+	case "api_key_env":
+		cfg.APIKeyEnv = value
+	case "base_url":
+		cfg.BaseURL = value
+	}
 }
 
 func parsePositiveSeconds(value, field string) (time.Duration, error) {
@@ -245,7 +307,7 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 			return fmt.Errorf("duplicate job name %q", job.Name)
 		}
 		seen[job.Name] = true
-		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" {
+		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" && job.Type != "ai_email" {
 			return fmt.Errorf("unknown job type %q for job %q", job.Type, job.Name)
 		}
 		if job.Interval <= 0 {
@@ -261,6 +323,31 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 				return fmt.Errorf("invalid outbox_path for job %q: %w", job.Name, err)
 			}
 		}
+		if job.Type == "ai_email" {
+			if err := validateAIEmailJobConfig(job); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateAIEmailJobConfig(job JobConfig) error {
+	if strings.TrimSpace(job.Prompt) == "" {
+		return fmt.Errorf("ai_email job %q requires prompt", job.Name)
+	}
+	if job.MaxChars <= 0 {
+		return fmt.Errorf("ai_email job %q requires positive max_chars", job.Name)
+	}
+	llmConfig := job.ResolvedLLM()
+	if strings.TrimSpace(llmConfig.Provider) == "" {
+		return fmt.Errorf("ai_email job %q requires llm provider", job.Name)
+	}
+	if strings.TrimSpace(llmConfig.Model) == "" {
+		return fmt.Errorf("ai_email job %q requires llm model", job.Name)
+	}
+	if strings.TrimSpace(llmConfig.APIKeyEnv) == "" {
+		return fmt.Errorf("ai_email job %q requires llm api_key_env", job.Name)
 	}
 	return nil
 }
