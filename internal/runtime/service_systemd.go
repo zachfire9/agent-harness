@@ -15,6 +15,7 @@ After=network-online.target
 
 [Service]
 Type=simple
+EnvironmentFile=-%h/.local/share/agent-harness/instances/%i/config/secrets/env
 ExecStart=%h/.local/bin/agent-harness daemon --instance %i --home %h/.local/share/agent-harness/instances/%i
 WorkingDirectory=%h/.local/share/agent-harness/instances/%i
 Restart=on-failure

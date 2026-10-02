@@ -581,6 +581,7 @@ func TestRunServiceInstallWritesSystemdUserTemplate(t *testing.T) {
 	for _, want := range []string{
 		"ExecStart=%h/.local/bin/agent-harness daemon --instance %i --home %h/.local/share/agent-harness/instances/%i",
 		"WorkingDirectory=%h/.local/share/agent-harness/instances/%i",
+		"EnvironmentFile=-%h/.local/share/agent-harness/instances/%i/config/secrets/env",
 	} {
 		if !strings.Contains(string(unit), want) {
 			t.Fatalf("expected unit to contain %q, got:\n%s", want, string(unit))
