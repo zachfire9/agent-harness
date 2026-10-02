@@ -793,7 +793,7 @@ For live manual OAuth verification, use a throwaway/test Google account or the d
 
 - **Status:** Completed
 - **Branch:** `step-29-gmail-notifier`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/31
 - **Concept:** Once Google auth is observable and revocable, add the first real network notifier by adapting the existing delivery interface to Gmail send-only delivery.
 
 ### Objective
