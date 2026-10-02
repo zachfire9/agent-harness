@@ -43,7 +43,7 @@ The project currently has:
 - provider-neutral vector store abstraction with a default `none` implementation for future RAG support without requiring a vector database yet
 - user-level background runtime commands for named instances, status files, and systemd user service installation
 - version metadata embedded at build time plus manual release artifacts for Linux amd64/arm64 installs
-- a configurable scheduled-job registry with a default heartbeat job, a local check-in job, notification test jobs, and bounded AI email jobs that can be inspected or manually triggered from the CLI
+- a configurable scheduled-job registry with interval and daily time-of-day schedules, a default heartbeat job, a local check-in job, notification test jobs, and bounded AI email jobs that can be inspected or manually triggered from the CLI
 - Google account connection metadata commands for secret-safe auth status, scope inspection, local token revocation, and access-token refresh for Google-backed actions
 - a Gmail send-only notifier adapter for notification jobs, backed by the same notifier interface as the safe local file outbox
 

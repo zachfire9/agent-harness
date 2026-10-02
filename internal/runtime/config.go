@@ -57,6 +57,8 @@ type JobConfig struct {
 	Type        string
 	Enabled     bool
 	Interval    time.Duration
+	intervalSet bool
+	Schedule    JobSchedule
 	Message     string
 	Prompt      string
 	MaxChars    int
@@ -66,6 +68,15 @@ type JobConfig struct {
 	Google      GoogleConfig
 	LLMOverride LLMSelector
 	LLM         LLMConfig
+}
+
+type JobSchedule struct {
+	DailyAt  string
+	Timezone string
+}
+
+func (schedule JobSchedule) IsZero() bool {
+	return strings.TrimSpace(schedule.DailyAt) == "" && strings.TrimSpace(schedule.Timezone) == ""
 }
 
 func (job JobConfig) ResolvedLLM() LLMConfig {
@@ -212,8 +223,16 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			section = "llms.providers.models"
 			continue
 		}
+		if section == "jobs.schedule" && !strings.HasPrefix(raw, "      ") {
+			section = "jobs"
+		}
 		if line == "llm:" && section == "jobs" && current != nil {
 			section = "jobs.llm"
+			continue
+		}
+		if line == "schedule:" && section == "jobs" && current != nil {
+			section = "jobs.schedule"
+			current.Interval = 0
 			continue
 		}
 		if line == "notifier:" {
@@ -259,7 +278,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				}
 				continue
 			}
-			if section != "jobs" && section != "jobs.llm" {
+			if section != "jobs" && section != "jobs.llm" && section != "jobs.schedule" {
 				continue
 			}
 			section = "jobs"
@@ -330,6 +349,15 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			parseLLMSelectorField(&current.LLMOverride, key, value)
 			continue
 		}
+		if section == "jobs.schedule" {
+			switch key {
+			case "daily_at":
+				current.Schedule.DailyAt = value
+			case "timezone":
+				current.Schedule.Timezone = value
+			}
+			continue
+		}
 		if section != "jobs" || !sawJobs || current == nil {
 			continue
 		}
@@ -350,6 +378,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				return nil, google, notifier, llmRegistry, true, 0, err
 			}
 			current.Interval = interval
+			current.intervalSet = true
 		case "message":
 			current.Message = value
 		case "prompt":
@@ -448,7 +477,10 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" && job.Type != "ai_email" {
 			return fmt.Errorf("unknown job type %q for job %q", job.Type, job.Name)
 		}
-		if job.Interval <= 0 {
+		if err := validateJobSchedule(job); err != nil {
+			return err
+		}
+		if job.Schedule.IsZero() && job.Interval <= 0 {
 			return fmt.Errorf("invalid interval_seconds for job %q", job.Name)
 		}
 		if job.Type == "local_checkin" {
@@ -469,6 +501,28 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 				return fmt.Errorf("ai_email job %q model %q is not listed for llm provider/profile %q", job.Name, job.ResolvedLLM().Model, job.ResolvedLLM().Profile)
 			}
 		}
+	}
+	return nil
+}
+
+func validateJobSchedule(job JobConfig) error {
+	if job.Schedule.IsZero() {
+		return nil
+	}
+	if job.intervalSet {
+		return fmt.Errorf("job %q schedule cannot be combined with interval_seconds", job.Name)
+	}
+	if strings.TrimSpace(job.Schedule.DailyAt) == "" {
+		return fmt.Errorf("job %q schedule daily_at is required", job.Name)
+	}
+	if _, err := time.Parse("15:04", job.Schedule.DailyAt); err != nil {
+		return fmt.Errorf("invalid schedule daily_at for job %q", job.Name)
+	}
+	if strings.TrimSpace(job.Schedule.Timezone) == "" {
+		return fmt.Errorf("job %q schedule timezone is required", job.Name)
+	}
+	if _, err := time.LoadLocation(job.Schedule.Timezone); err != nil {
+		return fmt.Errorf("invalid schedule timezone for job %q", job.Name)
 	}
 	return nil
 }
