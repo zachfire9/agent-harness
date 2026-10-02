@@ -69,7 +69,33 @@ Each job state records:
 - next run time;
 - output path, when a job produces a local artifact.
 
-Multiple enabled jobs can be configured independently. Disabled jobs are skipped. Unknown job types, invalid intervals, and unsafe local output paths are treated as configuration errors and are surfaced through status output. For backward compatibility, older configs with `heartbeat_job_interval_seconds` still configure the default heartbeat job when no `jobs:` list is present.
+Multiple enabled jobs can be configured independently. Disabled jobs are skipped. Unknown job types, invalid intervals or schedules, and unsafe local output paths are treated as configuration errors and are surfaced through status output. For backward compatibility, older configs with `heartbeat_job_interval_seconds` still configure the default heartbeat job when no `jobs:` list is present.
+
+Jobs can either use a simple interval or a wall-clock daily schedule.
+
+Use `interval_seconds` for short smoke-test loops and "run every N seconds after the prior run" behavior:
+
+```yaml
+jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
+```
+
+Use `schedule.daily_at` plus an IANA timezone when a job should run once per day at a specific local time:
+
+```yaml
+jobs:
+  - name: daily-ai-email
+    type: ai_email
+    enabled: true
+    schedule:
+      daily_at: "08:00"
+      timezone: "America/New_York"
+```
+
+A job must use either `interval_seconds` or `schedule`, not both. `daily_at` uses 24-hour `HH:MM` format. The daemon computes `next_run_at` in UTC from the configured timezone, so daylight-saving-time boundaries follow the local timezone rule instead of a fixed UTC offset.
 
 ### Local check-in jobs
 

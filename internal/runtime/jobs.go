@@ -18,6 +18,7 @@ type JobStatus string
 const (
 	JobSucceeded JobStatus = "succeeded"
 	JobFailed    JobStatus = "failed"
+	JobScheduled JobStatus = "scheduled"
 )
 
 type JobState struct {
@@ -354,6 +355,16 @@ func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {
 		if hasPrevious && previous.NextRunAt.After(now) {
 			continue
 		}
+		if !hasPrevious && !jobCfg.Schedule.IsZero() {
+			next, err := nextRunAt(jobCfg, now)
+			if err != nil {
+				return err
+			}
+			if next.After(now.UTC()) {
+				jobsState.Jobs[jobCfg.Name] = scheduledJobState(jobCfg, next)
+				continue
+			}
+		}
 		if _, err := runConfiguredJobWithState(paths, jobsState, jobCfg, now, registry); err != nil {
 			if writeErr := WriteJobs(paths.JobsPath, jobsState); writeErr != nil {
 				return writeErr
@@ -434,7 +445,9 @@ func normalizeJobState(state JobState, jobCfg JobConfig, now time.Time) JobState
 	if state.Status == JobSucceeded && state.LastSuccessAt.IsZero() {
 		state.LastSuccessAt = state.LastRunAt
 	}
-	if state.NextRunAt.IsZero() {
+	if next, err := nextRunAt(jobCfg, now); err == nil {
+		state.NextRunAt = next
+	} else if state.NextRunAt.IsZero() {
 		state.NextRunAt = state.LastRunAt.Add(jobCfg.Interval).UTC()
 	}
 	return state
@@ -445,13 +458,17 @@ func failedJobState(jobCfg JobConfig, now time.Time, err error) JobState {
 	if interval <= 0 {
 		interval = defaultHeartbeatJobInterval
 	}
+	next := now.Add(interval).UTC()
+	if scheduledNext, scheduleErr := nextRunAt(jobCfg, now); scheduleErr == nil {
+		next = scheduledNext
+	}
 	state := JobState{
 		Name:      jobCfg.Name,
 		Type:      jobCfg.Type,
 		Status:    JobFailed,
 		LastRunAt: now.UTC(),
 		LastError: err.Error(),
-		NextRunAt: now.Add(interval).UTC(),
+		NextRunAt: next,
 	}
 	if jobCfg.Type == "local_checkin" || jobCfg.Type == "notify_test" {
 		state.OutputPath = localCheckinOutputPath(jobCfg)
@@ -460,6 +477,43 @@ func failedJobState(jobCfg JobConfig, now time.Time, err error) JobState {
 		}
 	}
 	return state
+}
+
+func scheduledJobState(jobCfg JobConfig, next time.Time) JobState {
+	return JobState{
+		Name:      jobCfg.Name,
+		Type:      jobCfg.Type,
+		Status:    JobScheduled,
+		NextRunAt: next.UTC(),
+	}
+}
+
+func nextRunAt(jobCfg JobConfig, now time.Time) (time.Time, error) {
+	if !jobCfg.Schedule.IsZero() {
+		return nextDailyRunAt(jobCfg.Schedule, now)
+	}
+	interval := jobCfg.Interval
+	if interval <= 0 {
+		interval = defaultHeartbeatJobInterval
+	}
+	return now.Add(interval).UTC(), nil
+}
+
+func nextDailyRunAt(schedule JobSchedule, now time.Time) (time.Time, error) {
+	clock, err := time.Parse("15:04", schedule.DailyAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	loc, err := time.LoadLocation(schedule.Timezone)
+	if err != nil {
+		return time.Time{}, err
+	}
+	localNow := now.In(loc)
+	next := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), clock.Hour(), clock.Minute(), 0, 0, loc)
+	if !next.After(localNow) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next.UTC(), nil
 }
 
 func readJobsStateOrEmpty(path string) (JobsState, error) {

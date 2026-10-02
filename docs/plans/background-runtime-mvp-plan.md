@@ -1051,7 +1051,7 @@ Live verification should send at most one or two smoke-test emails, then restore
 
 ## Step 13 — Time-of-day scheduling for daily jobs
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-33-time-of-day-scheduling`
 - **Pull Request:** TBD
 - **Concept:** Add wall-clock daily scheduling so background jobs can run at a configured local time instead of only every N seconds after their previous run.

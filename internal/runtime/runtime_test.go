@@ -191,6 +191,75 @@ func TestReadRuntimeConfigRejectsInvalidJobInterval(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeConfigParsesDailySchedule(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", `jobs:
+  - name: daily-heartbeat
+    type: heartbeat
+    enabled: true
+    schedule:
+      daily_at: "08:00"
+      timezone: "America/New_York"
+`)
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if len(cfg.Jobs) != 1 {
+		t.Fatalf("expected one job, got %#v", cfg.Jobs)
+	}
+	job := cfg.Jobs[0]
+	if job.Schedule.DailyAt != "08:00" || job.Schedule.Timezone != "America/New_York" || job.Interval != 0 {
+		t.Fatalf("unexpected daily schedule config: %#v", job)
+	}
+}
+
+func TestReadRuntimeConfigRejectsInvalidDailySchedule(t *testing.T) {
+	for name, config := range map[string]string{
+		"bad-time": `jobs:
+  - name: daily-heartbeat
+    type: heartbeat
+    enabled: true
+    schedule:
+      daily_at: "25:00"
+      timezone: "America/New_York"
+`,
+		"bad-timezone": `jobs:
+  - name: daily-heartbeat
+    type: heartbeat
+    enabled: true
+    schedule:
+      daily_at: "08:00"
+      timezone: "Mars/Base"
+`,
+		"interval-and-schedule": `jobs:
+  - name: daily-heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
+    schedule:
+      daily_at: "08:00"
+      timezone: "America/New_York"
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			paths, err := LinuxPaths(t.TempDir(), "default")
+			if err != nil {
+				t.Fatalf("expected paths, got %v", err)
+			}
+			writeRuntimeTestFile(t, paths.ConfigDir, "config.yaml", config)
+			_, err = ReadRuntimeConfig(paths)
+			if err == nil || !strings.Contains(err.Error(), "schedule") {
+				t.Fatalf("expected schedule validation error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestReadRuntimeConfigParsesLocalCheckinJobFields(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
@@ -1024,6 +1093,56 @@ func TestRunConfiguredJobsHonorsNextRunAt(t *testing.T) {
 	}
 	if !jobs.Jobs["heartbeat"].LastRunAt.Equal(afterNextRun) {
 		t.Fatalf("job should rerun after next_run_at, got %#v", jobs.Jobs["heartbeat"])
+	}
+}
+
+func TestRunConfiguredJobsComputesDailyScheduleForLaterToday(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	now := time.Date(2026, 3, 10, 7, 30, 0, 0, loc)
+	wantNext := time.Date(2026, 3, 10, 8, 0, 0, 0, loc).UTC()
+	cfg := RuntimeConfig{Jobs: []JobConfig{{Name: "daily-heartbeat", Type: "heartbeat", Enabled: true, Schedule: JobSchedule{DailyAt: "08:00", Timezone: "America/New_York"}}}}
+
+	if err := RunConfiguredJobs(paths, cfg, now); err != nil {
+		t.Fatalf("run configured jobs failed: %v", err)
+	}
+	jobs, err := ReadJobs(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read jobs failed: %v", err)
+	}
+	if !jobs.Jobs["daily-heartbeat"].NextRunAt.Equal(wantNext) {
+		t.Fatalf("expected next run %s, got %#v", wantNext, jobs.Jobs["daily-heartbeat"])
+	}
+}
+
+func TestRunConfiguredJobsComputesDailyScheduleForTomorrowWhenTimePassed(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	now := time.Date(2026, 3, 10, 8, 30, 0, 0, loc)
+	wantNext := time.Date(2026, 3, 11, 8, 0, 0, 0, loc).UTC()
+	cfg := RuntimeConfig{Jobs: []JobConfig{{Name: "daily-heartbeat", Type: "heartbeat", Enabled: true, Schedule: JobSchedule{DailyAt: "08:00", Timezone: "America/New_York"}}}}
+
+	if err := RunConfiguredJobs(paths, cfg, now); err != nil {
+		t.Fatalf("run configured jobs failed: %v", err)
+	}
+	jobs, err := ReadJobs(paths.JobsPath)
+	if err != nil {
+		t.Fatalf("read jobs failed: %v", err)
+	}
+	if !jobs.Jobs["daily-heartbeat"].NextRunAt.Equal(wantNext) {
+		t.Fatalf("expected next run %s, got %#v", wantNext, jobs.Jobs["daily-heartbeat"])
 	}
 }
 
