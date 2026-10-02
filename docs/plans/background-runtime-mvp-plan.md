@@ -980,7 +980,7 @@ Live verification may use a cheap/default model profile and the dedicated agent 
 
 ## Step 12 — Local background service for scheduled AI email
 
-- **Status:** Planned
+- **Status:** In Progress
 - **Branch:** `step-32-local-ai-email-service`
 - **Pull Request:** TBD
 - **Concept:** Install and run the app as a local background service on the agent machine with a real scheduled AI-email job.

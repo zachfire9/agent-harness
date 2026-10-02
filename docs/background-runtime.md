@@ -308,6 +308,17 @@ For tests or custom installs, pass an explicit config home:
 agent-harness service install --config-home ~/.config
 ```
 
+For scheduled jobs that need provider credentials, put environment-variable assignments in the instance-local secret environment file:
+
+```bash
+mkdir -p ~/.local/share/agent-harness/instances/default/config/secrets
+chmod 700 ~/.local/share/agent-harness/instances/default/config/secrets
+printf 'OPENROUTER_API_KEY=...\n' > ~/.local/share/agent-harness/instances/default/config/secrets/env
+chmod 600 ~/.local/share/agent-harness/instances/default/config/secrets/env
+```
+
+The generated systemd unit loads this file with `EnvironmentFile=-.../config/secrets/env`. The leading `-` means the service can still start when the file is absent. Do not commit this file or paste real values into PRs, issues, docs, or logs.
+
 The generated template is:
 
 ```ini
@@ -317,6 +328,7 @@ After=network-online.target
 
 [Service]
 Type=simple
+EnvironmentFile=-%h/.local/share/agent-harness/instances/%i/config/secrets/env
 ExecStart=%h/.local/bin/agent-harness daemon --instance %i --home %h/.local/share/agent-harness/instances/%i
 WorkingDirectory=%h/.local/share/agent-harness/instances/%i
 Restart=on-failure
