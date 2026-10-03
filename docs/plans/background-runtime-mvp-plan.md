@@ -1115,7 +1115,7 @@ Live verification can use a near-future wall-clock time with a harmless local/fi
 
 - **Status:** Completed
 - **Branch:** `step-34-automated-release-binaries`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/36
 - **Concept:** Once the LLM email functionality works end-to-end and can be scheduled at a real daily time, publish the first versioned app binary so installs can use downloaded release artifacts instead of a source checkout and local `go build`.
 
 ### Objective
