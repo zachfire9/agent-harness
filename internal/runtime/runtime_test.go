@@ -1178,13 +1178,206 @@ func TestRunConfiguredJobNowRecordsFailureState(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeConfigParsesScheduledNotificationConfig(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `llms:
+  default:
+    provider: openai
+    model: "gpt-4o-mini"
+  providers:
+    - provider: openai
+      api_key_env: OPENAI_API_KEY
+      models:
+        - "gpt-4o-mini"
+sources:
+  google_docs:
+    vocabulary_doc_id: "doc-123"
+jobs:
+  - name: morning-note
+    type: scheduled_notification
+    enabled: true
+    interval_seconds: 86400
+    context:
+      - id: countdown
+        type: days_until_date
+        date: "2063-10-28"
+        label: "Zach's 80th birthday"
+        output_format: "{days} days until {label}"
+      - id: word
+        type: rotating_source_item
+        source:
+          type: google_doc
+          alias: vocabulary_doc_id
+          parser: non_empty_lines
+        selection:
+          strategy: round_robin
+          progress_key: vocabulary-daily-brief
+    render:
+      type: llm_template
+      prompt: "Write the complete email body. Countdown: {{ countdown }}. Word: {{ word }}. Include a definition and sentence."
+      max_chars: 1200
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	job := cfg.Jobs[0]
+	if job.Type != "scheduled_notification" || len(job.Context) != 2 {
+		t.Fatalf("unexpected scheduled notification config: %#v", job)
+	}
+	if job.Context[0].ID != "countdown" || job.Context[0].Type != "days_until_date" || job.Context[0].Date != "2063-10-28" {
+		t.Fatalf("unexpected countdown context: %#v", job.Context[0])
+	}
+	rotating := job.Context[1]
+	if rotating.ID != "word" || rotating.Type != "rotating_source_item" || rotating.Source.Alias != "vocabulary_doc_id" || rotating.Source.Parser != ProgressParserNonEmptyLines || rotating.Selection.ProgressKey != "vocabulary-daily-brief" {
+		t.Fatalf("unexpected rotating context: %#v", rotating)
+	}
+	if job.Render.Type != "llm_template" || job.Render.MaxChars != 1200 || !strings.Contains(job.Render.Prompt, "{{ word }}") {
+		t.Fatalf("unexpected render config: %#v", job.Render)
+	}
+}
+
+func TestRunScheduledNotificationUsesOneLLMCallAndAdvancesProgressAfterSend(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	notifier := &recordingNotifier{}
+	client := &recordingLLMClient{response: "13,536 days until Zach's 80th birthday\n\nVocabulary · Equanimity\n- Definition: Calmness under stress.\n- Example sentence: She handled the delay with equanimity."}
+	cfg := scheduledNotificationTestConfig()
+
+	state, err := runScheduledNotificationWithClients(paths, now, cfg, notifier, client, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+		return GoogleDocSource{Alias: alias, DocumentID: "doc-123", Title: "Vocabulary", Text: "Equanimity\nSomatic\n"}, nil
+	})
+	if err != nil {
+		t.Fatalf("run scheduled notification failed: %v", err)
+	}
+	if state.Status != JobSucceeded || state.Type != "scheduled_notification" {
+		t.Fatalf("unexpected state: %#v", state)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("expected one llm request, got %d", len(client.requests))
+	}
+	prompt := client.requests[0].Messages[1].Content
+	for _, want := range []string{"13,536 days until Zach's 80th birthday", "Word: Equanimity", "definition and sentence"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to contain %q, got %q", want, prompt)
+		}
+	}
+	if len(notifier.messages) != 1 || !strings.Contains(notifier.messages[0].Body, "Vocabulary · Equanimity") {
+		t.Fatalf("expected notifier to receive llm body, got %#v", notifier.messages)
+	}
+	progress, err := ReadProgressState(paths, "vocabulary-daily-brief")
+	if err != nil {
+		t.Fatalf("read progress failed: %v", err)
+	}
+	if progress.Cursor.NextIndex != 1 || progress.History.LastSelectedID != "equanimity" {
+		t.Fatalf("expected progress to advance after send, got %#v", progress)
+	}
+}
+
+func TestRunScheduledNotificationDoesNotAdvanceProgressWhenNotifierFails(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	notifier := &recordingNotifier{err: errors.New("send failed")}
+	client := &recordingLLMClient{response: "body"}
+	cfg := scheduledNotificationTestConfig()
+
+	_, err = runScheduledNotificationWithClients(paths, now, cfg, notifier, client, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+		return GoogleDocSource{Alias: alias, DocumentID: "doc-123", Title: "Vocabulary", Text: "Equanimity\nSomatic\n"}, nil
+	})
+	if err == nil {
+		t.Fatalf("expected notifier error")
+	}
+	progress, err := ReadProgressState(paths, "vocabulary-daily-brief")
+	if err != nil {
+		t.Fatalf("read progress failed: %v", err)
+	}
+	if progress.Cursor.NextIndex != 0 || progress.History.PendingItemID != "equanimity" || progress.History.LastSelectedID != "" {
+		t.Fatalf("expected progress to remain pending without advancing, got %#v", progress)
+	}
+}
+
+func TestScheduledNotificationProgressStateDoesNotPersistSourcePromptOrGeneratedBody(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	generated := "Vocabulary · Equanimity\n- Definition: generated body should not persist"
+	cfg := scheduledNotificationTestConfig()
+
+	_, err = runScheduledNotificationWithClients(paths, now, cfg, &recordingNotifier{}, &recordingLLMClient{response: generated}, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+		return GoogleDocSource{Alias: alias, DocumentID: "doc-123", Title: "Vocabulary", Text: "Equanimity\nSomatic\n"}, nil
+	})
+	if err != nil {
+		t.Fatalf("run scheduled notification failed: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(paths.StateDir, "progress", "vocabulary-daily-brief.json"))
+	if err != nil {
+		t.Fatalf("read progress file failed: %v", err)
+	}
+	contents := string(raw)
+	for _, forbidden := range []string{"Equanimity\nSomatic", "generated body should not persist", "Write the complete email body"} {
+		if strings.Contains(contents, forbidden) {
+			t.Fatalf("progress state persisted forbidden content %q in %s", forbidden, contents)
+		}
+	}
+}
+
+func scheduledNotificationTestConfig() JobConfig {
+	return JobConfig{
+		Name:     "morning-note",
+		Type:     "scheduled_notification",
+		Enabled:  true,
+		Interval: 24 * time.Hour,
+		Context: []NotificationContextConfig{
+			{ID: "countdown", Type: "days_until_date", Date: "2063-10-28", Label: "Zach's 80th birthday", OutputFormat: "{days} days until {label}"},
+			{
+				ID:   "word",
+				Type: "rotating_source_item",
+				Source: NotificationSourceConfig{
+					Type:   "google_doc",
+					Alias:  "vocabulary_doc_id",
+					Parser: ProgressParserNonEmptyLines,
+				},
+				Selection: NotificationSelectionConfig{Strategy: "round_robin", ProgressKey: "vocabulary-daily-brief"},
+			},
+		},
+		Render: NotificationRenderConfig{
+			Type:     "llm_template",
+			Prompt:   "Write the complete email body. Countdown: {{ countdown }}. Word: {{ word }}. Include a definition and sentence. Return only the body.",
+			MaxChars: 1200,
+		},
+		LLM: LLMConfig{Provider: "openai", Model: "gpt-4o-mini", APIKeyEnv: "OPENAI_API_KEY"},
+	}
+}
+
 type recordingNotifier struct {
 	messages []Message
+	err      error
 }
 
 func (r *recordingNotifier) Send(ctx context.Context, message Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if r.err != nil {
+		return r.err
 	}
 	r.messages = append(r.messages, message)
 	return nil

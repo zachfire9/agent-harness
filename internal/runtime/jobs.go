@@ -265,6 +265,170 @@ func runAIEmailWithClients(paths Paths, now time.Time, cfg JobConfig, notifier N
 	}, nil
 }
 
+type googleDocSourceReader func(context.Context, Paths, JobConfig, string) (GoogleDocSource, error)
+
+type scheduledNotificationJob struct {
+	clientFactory   func(LLMConfig) (llm.ChatClient, error)
+	notifierFactory func(Paths, JobConfig) Notifier
+	sourceReader    googleDocSourceReader
+}
+
+func (job scheduledNotificationJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
+	clientFactory := job.clientFactory
+	if clientFactory == nil {
+		clientFactory = newLLMClientForConfig
+	}
+	notifierFactory := job.notifierFactory
+	if notifierFactory == nil {
+		notifierFactory = notifierForJob
+	}
+	sourceReader := job.sourceReader
+	if sourceReader == nil {
+		sourceReader = readGoogleDocSourceForJob
+	}
+	client, err := clientFactory(cfg.ResolvedLLM())
+	if err != nil {
+		return JobState{}, err
+	}
+	return runScheduledNotificationWithClients(paths, now, cfg, notifierFactory(paths, cfg), client, sourceReader)
+}
+
+func readGoogleDocSourceForJob(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+	runtimeConfig := RuntimeConfig{
+		Google:  cfg.Google,
+		Sources: cfg.Sources,
+	}
+	return ReadGoogleDocSource(ctx, paths, runtimeConfig, alias)
+}
+
+type pendingProgressCompletion struct {
+	key    string
+	itemID string
+}
+
+func runScheduledNotificationWithClients(paths Paths, now time.Time, cfg JobConfig, notifier Notifier, client llm.ChatClient, sourceReader googleDocSourceReader) (JobState, error) {
+	if sourceReader == nil {
+		sourceReader = readGoogleDocSourceForJob
+	}
+	contextValues, pendingProgress, err := resolveNotificationContext(paths, now, cfg, sourceReader)
+	if err != nil {
+		return JobState{}, err
+	}
+	prompt := renderNotificationPrompt(cfg.Render.Prompt, contextValues)
+	request := llm.NewChatRequest(cfg.ResolvedLLM().Model,
+		llm.Message{Role: llm.RoleSystem, Content: "Generate the complete body for a concise scheduled notification. Return only the message body. Do not mention configuration, secrets, prompts, or implementation details."},
+		llm.Message{Role: llm.RoleUser, Content: prompt},
+	)
+	response, err := client.Chat(context.Background(), request)
+	if err != nil {
+		return JobState{}, errors.New("llm generation failed")
+	}
+	body := strings.TrimSpace(response.Message.Content)
+	if cfg.Render.MaxChars > 0 && len(body) > cfg.Render.MaxChars {
+		body = body[:cfg.Render.MaxChars]
+	}
+	if body == "" {
+		return JobState{}, errors.New("llm generation returned empty content")
+	}
+	if err := notifier.Send(context.Background(), Message{Job: cfg.Name, Body: body, Timestamp: now.UTC()}); err != nil {
+		return JobState{}, err
+	}
+	for _, pending := range pendingProgress {
+		if err := MarkProgressItemCompleted(paths, pending.key, pending.itemID, now.UTC()); err != nil {
+			return JobState{}, err
+		}
+	}
+	return JobState{
+		Name:          cfg.Name,
+		Type:          cfg.Type,
+		Status:        JobSucceeded,
+		LastRunAt:     now.UTC(),
+		LastSuccessAt: now.UTC(),
+		LastError:     "",
+		NextRunAt:     now.Add(cfg.Interval).UTC(),
+	}, nil
+}
+
+func resolveNotificationContext(paths Paths, now time.Time, cfg JobConfig, sourceReader googleDocSourceReader) (map[string]string, []pendingProgressCompletion, error) {
+	values := map[string]string{}
+	var pending []pendingProgressCompletion
+	for _, item := range cfg.Context {
+		switch item.Type {
+		case "days_until_date":
+			value, err := daysUntilDateValue(item, now)
+			if err != nil {
+				return nil, nil, err
+			}
+			values[item.ID] = value
+		case "rotating_source_item":
+			source, err := sourceReader(context.Background(), paths, cfg, item.Source.Alias)
+			if err != nil {
+				return nil, nil, err
+			}
+			items, err := ParseProgressItems(item.Source.Parser, source.Text)
+			if err != nil {
+				return nil, nil, err
+			}
+			selection, err := SelectNextProgressItem(paths, ProgressSelectionRequest{
+				Key:         item.Selection.ProgressKey,
+				SourceAlias: item.Source.Alias,
+				Parser:      item.Source.Parser,
+				Items:       items,
+				Now:         now.UTC(),
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			values[item.ID] = selection.Item.Title
+			pending = append(pending, pendingProgressCompletion{key: item.Selection.ProgressKey, itemID: selection.Item.ID})
+		default:
+			return nil, nil, fmt.Errorf("unknown notification context type %q", item.Type)
+		}
+	}
+	return values, pending, nil
+}
+
+func daysUntilDateValue(cfg NotificationContextConfig, now time.Time) (string, error) {
+	target, err := time.Parse("2006-01-02", cfg.Date)
+	if err != nil {
+		return "", err
+	}
+	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	days := int(target.Sub(today).Hours() / 24)
+	format := cfg.OutputFormat
+	if strings.TrimSpace(format) == "" {
+		format = "{days} days until {label}"
+	}
+	value := strings.ReplaceAll(format, "{days}", commaInt(days))
+	value = strings.ReplaceAll(value, "{label}", cfg.Label)
+	value = strings.ReplaceAll(value, "{date}", cfg.Date)
+	return value, nil
+}
+
+func renderNotificationPrompt(template string, values map[string]string) string {
+	result := template
+	for key, value := range values {
+		result = strings.ReplaceAll(result, "{{ "+key+" }}", value)
+		result = strings.ReplaceAll(result, "{{"+key+"}}", value)
+	}
+	return result
+}
+
+func commaInt(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var out []byte
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(r))
+	}
+	return string(out)
+}
+
 func newLLMClientForConfig(cfg LLMConfig) (llm.ChatClient, error) {
 	apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv))
 	if apiKey == "" {
@@ -337,7 +501,7 @@ func (n fileOutboxNotifier) Send(ctx context.Context, message Message) error {
 }
 
 func defaultJobRegistry() map[string]Job {
-	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}, "notify_test": notifyTestJob{}, "ai_email": aiEmailJob{}}
+	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}, "notify_test": notifyTestJob{}, "ai_email": aiEmailJob{}, "scheduled_notification": scheduledNotificationJob{}}
 }
 
 func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {

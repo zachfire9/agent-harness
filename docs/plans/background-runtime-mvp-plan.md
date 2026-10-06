@@ -1375,64 +1375,80 @@ The CLI names are illustrative; keep this slice small and prefer tests over broa
 
 ---
 
-## Step 18 — First Google-backed scheduled digest job
+## Step 18 — Generic scheduled notification job
 
-- **Status:** Planned
-- **Branch:** `step-38-google-doc-digest-job`
-- **Pull Request:** TBD
-- **Concept:** Combine the scheduler, Google Docs source adapter, durable rotating item cursors, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
+- **Status:** Completed
+- **Branch:** `step-38-daily-brief-job`
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/40
+- **Concept:** Use the source, progress, scheduler, LLM, and notifier pieces together through generic config-driven notification primitives instead of hardcoding user-specific daily-brief sections in app code.
 
 ### Objective
 
-Add a narrow scheduled job that reads one configured Google Doc, selects the next parsed item/card with durable round-robin progress, renders a deterministic short message, and sends it through the configured notifier.
+Add a `scheduled_notification` job that sends a bounded notification email by resolving named context values from config, rendering a prompt template with those values, making one LLM call for the final body, sending through the configured notifier, and advancing rotating-source progress only after successful delivery.
 
 ### Scope
 
-- Add a job type such as `google_doc_digest`, conceptually:
+- Add a reusable `scheduled_notification` job type, conceptually:
 
   ```yaml
   jobs:
-    - name: vocabulary-digest
-      type: google_doc_digest
+    - name: morning-note
+      type: scheduled_notification
       enabled: true
-      interval_seconds: 86400
-      source: vocabulary_doc_id
-      parser: non_empty_lines
-      selection:
-        strategy: round_robin
-        progress_key: vocabulary-word-daily
-      notifier: default
-      max_items: 1
+      schedule:
+        daily_at: "08:00"
+        timezone: "America/New_York"
+      context:
+        - id: countdown
+          type: days_until_date
+          date: "2063-10-28"
+          label: "Zach's 80th birthday"
+          output_format: "{days} days until {label}"
+        - id: word
+          type: rotating_source_item
+          source:
+            type: google_doc
+            alias: vocabulary_doc_id
+            parser: non_empty_lines
+          selection:
+            strategy: round_robin
+            progress_key: vocabulary-daily-brief
+      render:
+        type: llm_template
+        prompt: "Write the complete email body. Countdown first: {{ countdown }}. Then word: {{ word }}. Include a concise definition and example sentence. Return only the body."
+        max_chars: 1200
   ```
 
-- Keep rendering deterministic and templated. Do not call an LLM in this step.
-- Use one configured source and a small bounded output so delivery can be verified safely.
-- Record normal job metadata in `state/jobs.json` and progress metadata in `state/progress/`, but do not store full document content or full delivered message there.
-- Advance the progress cursor only after the notifier reports success.
-- Keep this separate from a full daily brief. Additional sections, enrichment, model polish, and multiple source documents should be later steps.
+- Keep reusable deterministic context producers in code:
+  - `days_until_date`
+  - `rotating_source_item`
+- Keep labels such as daily brief, birthday, vocabulary, section names, and wording in instance config only.
+- Make one LLM call with the rendered prompt; the LLM should produce the complete message body.
+- Send via the configured notifier and advance rotating-source progress only after the notifier reports success.
+- Record normal job metadata in `state/jobs.json` and progress metadata in `state/progress/`, but do not store full document content, prompts, generated message bodies, or credentials in durable progress/job state.
+- Do not add broad daily-brief section abstractions, agent/tool access, or multiple renderer types in this step.
 
 ### Tests
 
 Add deterministic tests for:
 
-- configured Google Doc digest job reads through the source interface;
-- digest selects the next item/card through the durable progress layer;
-- digest rendering is bounded and deterministic;
-- notifier receives the expected compact message through a fake notifier;
-- source/notifier failures are recorded as failed job state with secret-safe errors and do not advance progress;
-- disabled digest jobs do not fetch Docs or send notifications;
-- no model calls are made.
+- configured `scheduled_notification` jobs parse generic context producers and renderer config;
+- `days_until_date` and `rotating_source_item` values are rendered into a single LLM request;
+- notifier receives the LLM-returned fully formatted body;
+- progress cursor advances after successful send and wraps after the last item;
+- source, LLM, and notifier failures are recorded as failed job state and do not advance progress;
+- persisted progress/job state does not contain full source text, generated message bodies, prompts, or credentials.
 
 ### Verification
 
 ```bash
 go test ./...
-agent-harness jobs run vocabulary-digest --instance default
+agent-harness jobs run morning-note --instance default
 agent-harness jobs list --instance default
 agent-harness status --instance default --json
 ```
 
-Live verification should start with manual `jobs run` before enabling the digest on an unattended interval.
+Live verification should start with manual `jobs run` before enabling the notification on an unattended schedule.
 
 ---
 

@@ -240,6 +240,74 @@ jobs:
 
 `api_key_env` names an environment variable in a provider/profile entry; raw API keys must not be stored in `config/config.yaml`, and job entries should only reference provider/profile/model selectors. By default, the profile name is the provider name; if you configure the same provider more than once, use an explicit `profile`. `provider` currently supports `openrouter`, `openai`, or `openai_compatible` with `base_url`. Job state records success/failure metadata only; it does not store the prompt, generated email body, API key, or raw provider response.
 
+### Scheduled notification jobs
+
+The `scheduled_notification` job type composes reusable notification pieces without hardcoding user-specific sections in Go. Each job declares named context values, renders a prompt template with those values, sends one LLM-generated body through the configured notifier, and advances any rotating-source progress only after delivery succeeds.
+
+Supported context producers in this first slice:
+
+- `days_until_date`: computes a deterministic date countdown from config.
+- `rotating_source_item`: reads a configured source, parses items, selects the next item with durable round-robin progress, and exposes the selected item text as a context value.
+
+Example:
+
+```yaml
+google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scopes:
+    - gmail_send
+    - docs_readonly
+llms:
+  default:
+    provider: openai
+    model: "gpt-4o-mini"
+  providers:
+    - provider: openai
+      api_key_env: OPENAI_API_KEY
+      models:
+        - "gpt-4o-mini"
+notifier:
+  type: gmail
+  gmail:
+    from: "agent@example.com"
+    to:
+      - "operator@example.com"
+    subject_prefix: "[agent-harness]"
+sources:
+  google_docs:
+    vocabulary_doc_id: "GOOGLE_DOC_ID"
+jobs:
+  - name: morning-note
+    type: scheduled_notification
+    enabled: true
+    schedule:
+      daily_at: "08:00"
+      timezone: "America/New_York"
+    context:
+      - id: countdown
+        type: days_until_date
+        date: "2063-10-28"
+        label: "Zach's 80th birthday"
+        output_format: "{days} days until {label}"
+      - id: word
+        type: rotating_source_item
+        source:
+          type: google_doc
+          alias: vocabulary_doc_id
+          parser: non_empty_lines
+        selection:
+          strategy: round_robin
+          progress_key: vocabulary-daily-brief
+    render:
+      type: llm_template
+      prompt: "Write the complete email body. Countdown first: {{ countdown }}. Then word: {{ word }}. Include a concise definition and example sentence. Return only the body."
+      max_chars: 1200
+```
+
+The app code only knows generic context producer and renderer types; labels such as daily brief, birthday, or vocabulary live in instance config. `state/progress/<progress_key>.json` stores cursor metadata and item IDs, not document contents, prompts, generated message bodies, tokens, or API keys.
+
 ## Inspect and manually run jobs
 
 List configured jobs without needing a long-running daemon:
