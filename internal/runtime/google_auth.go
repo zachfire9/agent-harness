@@ -31,10 +31,11 @@ type GoogleConfig struct {
 	TokenPath             string
 	AccountHint           string
 	ScopeProfile          string
+	ScopeAliases          []string
 }
 
 func (cfg GoogleConfig) configured() bool {
-	return strings.TrimSpace(cfg.ClientCredentialsPath) != "" || strings.TrimSpace(cfg.TokenPath) != "" || strings.TrimSpace(cfg.AccountHint) != "" || strings.TrimSpace(cfg.ScopeProfile) != ""
+	return strings.TrimSpace(cfg.ClientCredentialsPath) != "" || strings.TrimSpace(cfg.TokenPath) != "" || strings.TrimSpace(cfg.AccountHint) != "" || strings.TrimSpace(cfg.ScopeProfile) != "" || len(cfg.ScopeAliases) > 0
 }
 
 func (cfg GoogleConfig) WithDefaults() GoogleConfig {
@@ -58,30 +59,65 @@ func (cfg GoogleConfig) Validate() error {
 	if err := validateInstanceRelativePath(cfg.TokenPath); err != nil {
 		return fmt.Errorf("invalid google token_path: %w", err)
 	}
-	if _, err := cfg.ScopeProfileScopes(); err != nil {
+	if _, err := cfg.ScopesWithError(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (cfg GoogleConfig) ScopeProfileScopes() ([]string, error) {
-	switch cfg.ScopeProfile {
-	case GoogleScopeProfileGmailSend:
-		return []string{GoogleScopeGmailSend}, nil
-	case GoogleScopeProfileDocsReadonly:
-		return []string{GoogleScopeDocsReadonly}, nil
-	case "":
-		if cfg.configured() {
-			return nil, fmt.Errorf("google scope_profile is required")
+func (cfg GoogleConfig) RequestedScopeAliases() []string {
+	if len(cfg.ScopeAliases) > 0 {
+		aliases := make([]string, 0, len(cfg.ScopeAliases))
+		for _, alias := range cfg.ScopeAliases {
+			alias = strings.TrimSpace(alias)
+			if alias != "" {
+				aliases = append(aliases, alias)
+			}
 		}
+		return aliases
+	}
+	if strings.TrimSpace(cfg.ScopeProfile) != "" {
+		return []string{strings.TrimSpace(cfg.ScopeProfile)}
+	}
+	return nil
+}
+
+func (cfg GoogleConfig) ScopesWithError() ([]string, error) {
+	aliases := cfg.RequestedScopeAliases()
+	if len(aliases) == 0 {
 		return nil, nil
+	}
+	scopes := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		scope, ok := googleScopeForAlias(alias)
+		if !ok {
+			if len(cfg.ScopeAliases) == 0 && cfg.ScopeProfile != "" {
+				return nil, fmt.Errorf("unknown google scope_profile %q", alias)
+			}
+			return nil, fmt.Errorf("unknown google scope alias %q", alias)
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, nil
+}
+
+func googleScopeForAlias(alias string) (string, bool) {
+	switch alias {
+	case GoogleScopeProfileGmailSend:
+		return GoogleScopeGmailSend, true
+	case GoogleScopeProfileDocsReadonly:
+		return GoogleScopeDocsReadonly, true
 	default:
-		return nil, fmt.Errorf("unknown google scope_profile %q", cfg.ScopeProfile)
+		return "", false
 	}
 }
 
+func (cfg GoogleConfig) ScopeProfileScopes() ([]string, error) {
+	return cfg.ScopesWithError()
+}
+
 func (cfg GoogleConfig) Scopes() []string {
-	scopes, err := cfg.ScopeProfileScopes()
+	scopes, err := cfg.ScopesWithError()
 	if err != nil {
 		return nil
 	}
@@ -248,7 +284,9 @@ type GoogleAuthStatusInfo struct {
 	Connected    bool
 	AccountHint  string
 	ScopeProfile string
+	ScopeAliases []string
 	Scopes       []string
+	TokenScopes  []string
 	TokenExpiry  string
 	TokenPath    string
 }
@@ -260,11 +298,17 @@ func (s GoogleAuthStatusInfo) SafeString() string {
 	if s.AccountHint != "" {
 		fmt.Fprintf(&b, "  account_hint: %s\n", s.AccountHint)
 	}
-	if s.ScopeProfile != "" {
+	if s.ScopeProfile != "" && len(s.ScopeAliases) == 0 {
 		fmt.Fprintf(&b, "  scope_profile: %s\n", s.ScopeProfile)
+	}
+	for _, alias := range s.ScopeAliases {
+		fmt.Fprintf(&b, "  scope_alias: %s\n", alias)
 	}
 	for _, scope := range s.Scopes {
 		fmt.Fprintf(&b, "  scope: %s\n", scope)
+	}
+	for _, scope := range s.TokenScopes {
+		fmt.Fprintf(&b, "  token_scope: %s\n", scope)
 	}
 	if s.TokenExpiry != "" {
 		fmt.Fprintf(&b, "  token_expiry: %s\n", s.TokenExpiry)
@@ -293,6 +337,7 @@ func GoogleAuthStatus(paths Paths, cfg GoogleConfig) (GoogleAuthStatusInfo, erro
 		Connected:    false,
 		AccountHint:  cfg.AccountHint,
 		ScopeProfile: cfg.ScopeProfile,
+		ScopeAliases: cfg.ScopeAliases,
 		Scopes:       scopes,
 		TokenPath:    cfg.TokenPath,
 	}
@@ -310,6 +355,7 @@ func GoogleAuthStatus(paths Paths, cfg GoogleConfig) (GoogleAuthStatusInfo, erro
 	}
 	status.Connected = true
 	status.TokenExpiry = token.Expiry
+	status.TokenScopes = strings.Fields(token.Scope)
 	return status, nil
 }
 
@@ -336,13 +382,28 @@ func GoogleAuthStartInstructions(paths Paths, cfg GoogleConfig) (string, error) 
 		return "", err
 	}
 	cfg = cfg.WithDefaults()
+	scopes, err := cfg.ScopesWithError()
+	if err != nil {
+		return "", err
+	}
+	if len(scopes) == 0 {
+		return "", fmt.Errorf("google scopes are required for auth start")
+	}
 	var b strings.Builder
 	fmt.Fprintln(&b, "google auth start")
 	if cfg.AccountHint != "" {
 		fmt.Fprintf(&b, "account_hint: %s\n", cfg.AccountHint)
 	}
-	fmt.Fprintf(&b, "scope_profile: %s\n", cfg.ScopeProfile)
-	for _, scope := range cfg.Scopes() {
+	aliases := cfg.RequestedScopeAliases()
+	if cfg.ScopeProfile != "" && len(cfg.ScopeAliases) == 0 {
+		fmt.Fprintf(&b, "scope_profile: %s\n", cfg.ScopeProfile)
+	}
+	for _, alias := range aliases {
+		if len(cfg.ScopeAliases) > 0 {
+			fmt.Fprintf(&b, "scope_alias: %s\n", alias)
+		}
+	}
+	for _, scope := range scopes {
 		fmt.Fprintf(&b, "scope: %s\n", scope)
 	}
 	fmt.Fprintf(&b, "client_credentials_path: %s\n", cfg.ClientCredentialsPath)

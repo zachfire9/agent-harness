@@ -34,9 +34,6 @@ func (n gmailNotifier) Send(ctx context.Context, message Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if n.google.ScopeProfile != GoogleScopeProfileGmailSend {
-		return fmt.Errorf("gmail notifier requires google scope_profile gmail_send")
-	}
 	client := n.client
 	if client == nil {
 		client = http.DefaultClient

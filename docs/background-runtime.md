@@ -137,14 +137,15 @@ jobs:
 
 Each outbox JSONL record includes the job name, timestamp, message, and `transport: "file_outbox"`. Job status points to the outbox path but does not dump message contents into `jobs list` output. Delivery failures are recorded in `state/jobs.json` as failed job state with `last_error`.
 
-A Gmail send-only notifier can also back the same `notify_test` job when Google auth is configured with the narrow `gmail_send` scope:
+A Gmail send-only notifier can also back the same `notify_test` job when Google auth has a token with the Gmail send scope. Configure the requested auth scope with `google.scopes` when generating or regenerating the token:
 
 ```yaml
 google:
   client_credentials_path: "config/secrets/google-client.json"
   token_path: "config/secrets/google-token.json"
   account_hint: "agent@example.com"
-  scope_profile: "gmail_send"
+  scopes:
+    - gmail_send
 notifier:
   type: gmail
   gmail:
@@ -274,13 +275,24 @@ google:
   client_credentials_path: "config/secrets/google-client.json"
   token_path: "config/secrets/google-token.json"
   account_hint: "agent@example.com"
-  scope_profile: "gmail_send"
+  scopes:
+    - gmail_send
+    - docs_readonly
 ```
 
-Supported narrow scope profiles:
+Supported narrow scope aliases:
 
 - `gmail_send`: requests `https://www.googleapis.com/auth/gmail.send` for the Gmail notifier.
 - `docs_readonly`: requests `https://www.googleapis.com/auth/documents.readonly` for the Google Docs source adapter.
+
+`google.scopes` is the preferred config for token generation because it composes multiple Google capabilities without inventing combined profile names. Older configs may still use the legacy single-value key:
+
+```yaml
+google:
+  scope_profile: "gmail_send"
+```
+
+When both `scopes` and `scope_profile` are present, `scopes` takes precedence. These settings describe which permissions `google auth start` should request; runtime Google calls still depend on the actual saved token scopes and Google API permissions.
 
 `agent-harness init` creates `config/secrets/` with restricted directory permissions. Store Google client credentials and token files there with `0600` file permissions. These files are local secrets and must not be committed.
 
@@ -290,7 +302,7 @@ Inspect Google auth state without printing token values:
 agent-harness google auth status --instance default
 ```
 
-Start the safe auth handoff/instructions for the configured scope profile:
+Start the safe auth handoff/instructions for the configured scope aliases:
 
 ```bash
 agent-harness google auth start --instance default
@@ -302,7 +314,7 @@ Remove the local Google token file without deleting the client credentials file:
 agent-harness google auth revoke --instance default --confirm revoke-google-token
 ```
 
-The auth status/start commands may print safe metadata such as account hint, scope profile, requested scopes, token expiry, and configured paths. They must not print access tokens, refresh tokens, client secrets, authorization codes, or raw credential JSON. Google-backed actions may refresh an expired access token using the saved refresh token and client credentials; refresh failures are reported with controlled status-only errors. To fully revoke cloud-side access, also remove the app from the connected Google account's security settings.
+The auth status/start commands may print safe metadata such as account hint, legacy scope profile, requested scope aliases, requested concrete scopes, token scopes, token expiry, and configured paths. They must not print access tokens, refresh tokens, client secrets, authorization codes, or raw credential JSON. Google-backed actions may refresh an expired access token using the saved refresh token and client credentials; refresh failures are reported with controlled status-only errors. To fully revoke cloud-side access, also remove the app from the connected Google account's security settings.
 
 ## Configure Google Docs read-only sources
 
@@ -319,7 +331,8 @@ google:
   client_credentials_path: "config/secrets/google-client.json"
   token_path: "config/secrets/google-token.json"
   account_hint: "agent@example.com"
-  scope_profile: "docs_readonly"
+  scopes:
+    - docs_readonly
 sources:
   google_docs:
     vocabulary_doc_id: "DOC_ID_HERE"
@@ -331,7 +344,7 @@ Read a configured document source by alias:
 agent-harness google docs read vocabulary_doc_id --instance default
 ```
 
-The command calls the Google Docs API for the configured document ID using the instance's saved OAuth token. It requires the `docs_readonly` scope profile and accepts a token that includes either `https://www.googleapis.com/auth/documents.readonly` or the broader `https://www.googleapis.com/auth/documents` scope. If the access token is expired and refresh metadata exists, the app refreshes it before reading.
+The command calls the Google Docs API for the configured document ID using the instance's saved OAuth token. `google.scopes` tells `google auth start` which scopes to request; the read command itself accepts a saved token that includes either `https://www.googleapis.com/auth/documents.readonly` or the broader `https://www.googleapis.com/auth/documents` scope. If the access token is expired and refresh metadata exists, the app refreshes it before reading.
 
 Step 15 intentionally does not search Google Drive by title. Drive discovery would require extra Drive API scope and ambiguity handling. Configure exact document IDs explicitly, then use the read command as a smoke test before wiring future jobs to that source.
 

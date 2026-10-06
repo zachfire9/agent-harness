@@ -44,7 +44,7 @@ The project currently has:
 - user-level background runtime commands for named instances, status files, and systemd user service installation
 - version metadata embedded at build time plus automated GitHub Release artifacts for Linux amd64/arm64 installs
 - a configurable scheduled-job registry with interval and daily time-of-day schedules, a default heartbeat job, a local check-in job, notification test jobs, and bounded AI email jobs that can be inspected or manually triggered from the CLI
-- Google account connection metadata commands for secret-safe auth status, scope inspection, local token revocation, and access-token refresh for Google-backed actions
+- Google account connection metadata commands for secret-safe auth status, composable scope-alias inspection, local token revocation, and access-token refresh for Google-backed actions
 - a Google Docs read-only source adapter that reads explicitly configured document IDs by local alias
 - a Gmail send-only notifier adapter for notification jobs, backed by the same notifier interface as the safe local file outbox
 
