@@ -19,6 +19,7 @@ const (
 
 	GoogleScopeGmailSend    = "https://www.googleapis.com/auth/gmail.send"
 	GoogleScopeDocsReadonly = "https://www.googleapis.com/auth/documents.readonly"
+	GoogleScopeDocuments    = "https://www.googleapis.com/auth/documents"
 
 	defaultGoogleOAuthTokenEndpoint = "https://oauth2.googleapis.com/token"
 )

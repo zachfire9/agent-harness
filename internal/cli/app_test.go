@@ -1164,6 +1164,29 @@ func TestRunGoogleAuthStartPrintsSecretSafeScopeInstructions(t *testing.T) {
 	}
 }
 
+func TestRunGoogleDocsReadRejectsUnknownConfiguredAliasBeforeNetwork(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "default")
+	if _, stderr, exitCode := runCLI("agent-harness", "init", "--instance", "default", "--home", home); exitCode != 0 {
+		t.Fatalf("init failed with exit %d: %s", exitCode, stderr)
+	}
+	writeCLITestFile(t, home, "config/config.yaml", `google:
+  token_path: "config/secrets/google-token.json"
+  scope_profile: "docs_readonly"
+sources:
+  google_docs:
+    vocabulary_doc_id: "doc-vocabulary-123"
+`)
+
+	stdout, stderr, exitCode := runCLI("agent-harness", "google", "docs", "read", "missing_alias", "--instance", "default", "--home", home)
+
+	if exitCode == 0 {
+		t.Fatal("expected unknown alias to fail")
+	}
+	if stdout != "" || !strings.Contains(stderr, `unknown google docs source "missing_alias"`) {
+		t.Fatalf("expected unknown alias error, stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
 func runCLI(args ...string) (stdout string, stderr string, exitCode int) {
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer

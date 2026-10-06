@@ -1194,9 +1194,9 @@ agent-harness status --instance default --json
 
 ## Step 15 — Google Docs read-only source adapter
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-35-google-docs-source`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/37
 - **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.
 
 ### Objective
@@ -1213,7 +1213,7 @@ Read a configured Google Doc using a minimum-scope Google token and expose the r
       vocabulary_doc_id: "placeholder-doc-id"
   ```
 
-- Require the `docs_readonly` scope profile or a later explicit combined profile if Gmail and Docs must share one token.
+- Read with a token that has Docs capability (`documents.readonly` or broader `documents`); keep scope-profile/scopes config as auth-generation guidance rather than proof that the current token has permission.
 - Add a debug/read command that fetches safe metadata and text from a configured document, conceptually:
 
   ```bash
@@ -1247,16 +1247,144 @@ Live verification should use a test/shared document with non-sensitive content f
 
 ---
 
-## Step 16 — First Google-backed scheduled digest job
+## Step 16 — Google OAuth scopes list config
 
 - **Status:** Planned
-- **Branch:** `step-36-google-doc-digest-job`
+- **Branch:** `step-36-google-scopes-list-config`
 - **Pull Request:** TBD
-- **Concept:** Combine the scheduler, Google Docs source adapter, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
+- **Concept:** Replace the single `scope_profile` setting with a composable scopes list for Google OAuth token generation, while keeping the existing profile key as backward-compatible config.
 
 ### Objective
 
-Add a narrow scheduled job that reads one configured Google Doc, renders a deterministic short message, and sends it through the configured notifier.
+Make Google OAuth authorization easier to combine for jobs that need multiple Google capabilities, such as reading Docs and sending Gmail, without inventing combined profile names like `gmail_send_docs_readonly`.
+
+### Scope
+
+- Add first-class list config, conceptually:
+
+  ```yaml
+  google:
+    scopes:
+      - gmail_send
+      - docs_readonly
+  ```
+
+- Expand known aliases to concrete OAuth scopes, for example:
+
+  ```text
+  gmail_send    -> https://www.googleapis.com/auth/gmail.send
+  docs_readonly -> https://www.googleapis.com/auth/documents.readonly
+  ```
+
+- Keep `google.scope_profile` as a legacy/backward-compatible single-alias input.
+- Prefer `google.scopes` when both `scopes` and `scope_profile` are present, and document that precedence clearly.
+- Allow `google auth start` to request the union of configured scopes.
+- Update `google auth status` to show requested aliases/scopes and actual token scopes without printing token values.
+- Keep runtime operations focused on token/API capability rather than treating configured scopes as proof of permission.
+- Do not add named Google connections in this step; keep that as a later extension if multiple accounts/token files become necessary.
+
+### Tests
+
+Add deterministic tests for:
+
+- parsing `google.scopes` as a list;
+- legacy `scope_profile` still works;
+- `scopes` takes precedence over `scope_profile`;
+- auth-start URLs include all requested concrete scopes;
+- unknown scope aliases fail clearly;
+- status/auth output remains secret-safe and does not print access or refresh tokens.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness google auth start --instance default
+agent-harness google auth status --instance default
+```
+
+Use placeholder/non-sensitive config examples only; do not commit token files or client credentials.
+
+---
+
+## Step 17 — Durable rotating item cursors for document-backed sources
+
+- **Status:** Planned
+- **Branch:** `step-37-durable-rotating-item-cursors`
+- **Pull Request:** TBD
+- **Concept:** Add generic durable progress tracking for sources that should emit one item/card at a time across scheduled runs, before wiring that behavior into a delivery job.
+
+### Objective
+
+Add a reusable progress/cursor layer that can select the next item from a parsed source, persist that position across daemon restarts, wrap after the last item, and remain broad enough for vocabulary words, title-plus-bullet cards, quotes, prompts, and other rotating personal-knowledge sources.
+
+### Scope
+
+- Add a small persistent progress store under instance state, conceptually:
+
+  ```text
+  state/progress/<progress-key>.json
+  ```
+
+- Add a generic round-robin selector that operates on parsed item IDs rather than vocabulary-specific records.
+- Support a cycle snapshot model:
+  - parse the source into ordered items/cards at the start of a cycle;
+  - persist the ordered item IDs and cursor;
+  - advance through that snapshot until exhausted;
+  - refresh the snapshot only at the next cycle boundary so doc edits do not unexpectedly skip/repeat items mid-cycle.
+- Add parser primitives for at least:
+  - `non_empty_lines` for simple one-word/one-item-per-line documents;
+  - `heading_with_bullets` or an equivalent card parser that can represent a title plus bullet-point body.
+- Keep parser output generic, conceptually:
+
+  ```json
+  {
+    "id": "perspicacious",
+    "title": "Perspicacious",
+    "body": [
+      "having keen mental perception",
+      "example sentence..."
+    ]
+  }
+  ```
+
+- Advance the cursor only after the caller reports successful delivery or completion; failed sends should retry the same item next time.
+- Store progress metadata and item IDs, not full Google Doc contents or delivered message bodies, in durable state.
+- Keep this step source/selection focused. Do not add the scheduled email/digest job yet, and do not call an LLM.
+
+### Tests
+
+Add deterministic tests for:
+
+- round-robin selection advances from item to item and wraps after the last item;
+- state survives reloads from disk and writes atomically;
+- `non_empty_lines` parsing trims blank lines and creates stable item IDs;
+- title-plus-bullet parsing creates stable cards with title/body fields;
+- snapshot refresh occurs only at cycle boundaries;
+- cursor does not advance when completion/delivery fails;
+- progress state does not persist full source text, credentials, or delivered message bodies.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness progress show vocabulary-word-daily --instance default
+agent-harness sources items preview vocabulary_doc_id --parser non_empty_lines --instance default
+```
+
+The CLI names are illustrative; keep this slice small and prefer tests over broad user-facing commands if the command surface starts to grow.
+
+---
+
+## Step 18 — First Google-backed scheduled digest job
+
+- **Status:** Planned
+- **Branch:** `step-38-google-doc-digest-job`
+- **Pull Request:** TBD
+- **Concept:** Combine the scheduler, Google Docs source adapter, durable rotating item cursors, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
+
+### Objective
+
+Add a narrow scheduled job that reads one configured Google Doc, selects the next parsed item/card with durable round-robin progress, renders a deterministic short message, and sends it through the configured notifier.
 
 ### Scope
 
@@ -1269,23 +1397,29 @@ Add a narrow scheduled job that reads one configured Google Doc, renders a deter
       enabled: true
       interval_seconds: 86400
       source: vocabulary_doc_id
+      parser: non_empty_lines
+      selection:
+        strategy: round_robin
+        progress_key: vocabulary-word-daily
       notifier: default
       max_items: 1
   ```
 
 - Keep rendering deterministic and templated. Do not call an LLM in this step.
 - Use one configured source and a small bounded output so delivery can be verified safely.
-- Record normal job metadata in `state/jobs.json` but do not store full document content or full delivered message there.
-- Keep this separate from a full daily brief. Additional sections, rotations, enrichment, model polish, and multiple source documents should be later steps.
+- Record normal job metadata in `state/jobs.json` and progress metadata in `state/progress/`, but do not store full document content or full delivered message there.
+- Advance the progress cursor only after the notifier reports success.
+- Keep this separate from a full daily brief. Additional sections, enrichment, model polish, and multiple source documents should be later steps.
 
 ### Tests
 
 Add deterministic tests for:
 
 - configured Google Doc digest job reads through the source interface;
+- digest selects the next item/card through the durable progress layer;
 - digest rendering is bounded and deterministic;
 - notifier receives the expected compact message through a fake notifier;
-- source/notifier failures are recorded as failed job state with secret-safe errors;
+- source/notifier failures are recorded as failed job state with secret-safe errors and do not advance progress;
 - disabled digest jobs do not fetch Docs or send notifications;
 - no model calls are made.
 
