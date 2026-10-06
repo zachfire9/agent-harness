@@ -1308,7 +1308,7 @@ Use placeholder/non-sensitive config examples only; do not commit token files or
 
 ## Step 17 — Durable rotating item cursors for document-backed sources
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-37-durable-rotating-item-cursors`
 - **Pull Request:** TBD
 - **Concept:** Add generic durable progress tracking for sources that should emit one item/card at a time across scheduled runs, before wiring that behavior into a delivery job.

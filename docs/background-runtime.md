@@ -350,6 +350,36 @@ Step 15 intentionally does not search Google Drive by title. Drive discovery wou
 
 The document text is printed to stdout for the explicit read command. It is not written into `state/status.json` or `state/jobs.json`, and errors must not include access tokens, refresh tokens, client secrets, or raw credential JSON.
 
+## Durable rotating item cursors
+
+Document-backed jobs can use a small progress subsystem to select one parsed item at a time and remember the next item across daemon restarts. Progress state is stored under the instance state directory:
+
+```text
+~/.local/share/agent-harness/instances/default/state/progress/<progress-key>.json
+```
+
+The progress state records safe metadata only:
+
+- progress key;
+- selection strategy, currently `round_robin`;
+- next item index and cycle count;
+- active cycle snapshot of item IDs;
+- source alias and parser name;
+- pending/last selected item IDs and timestamps.
+
+It does not store full Google Doc text, delivered message bodies, OAuth tokens, refresh tokens, client secrets, or credential JSON.
+
+Current parser primitives are internal runtime capabilities for future jobs:
+
+- `non_empty_lines`: trims blank lines and treats each remaining line as one item;
+- `heading_with_bullets`: treats a heading/title followed by bullet lines as a card with `title` and `body` fields.
+
+The selector uses cycle snapshots: it parses the current source into ordered item IDs at the start of a cycle, walks that snapshot until the last item, and refreshes the snapshot only at the next cycle boundary. This avoids surprising skips or repeats if a document is edited midway through a cycle.
+
+Cursor advancement is explicit. A caller selects/peeks the next item, performs the work, and advances progress only after successful completion or delivery. Failed sends should leave the cursor unchanged so the same item can be retried.
+
+Step 17 intentionally adds these primitives before adding a user-facing scheduled digest job. Step 18 will wire the Google Docs source, parser, progress cursor, and notifier together.
+
 ## Run a daemon smoke test
 
 ```bash
