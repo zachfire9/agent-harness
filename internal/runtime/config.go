@@ -88,6 +88,11 @@ type RuntimeConfig struct {
 	Google   GoogleConfig
 	Notifier NotifierConfig
 	LLMs     LLMRegistryConfig
+	Sources  SourceConfig
+}
+
+type SourceConfig struct {
+	GoogleDocs map[string]string
 }
 
 type NotifierConfig struct {
@@ -122,13 +127,14 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	}
 	defer file.Close()
 
-	parsedJobs, googleConfig, notifierConfig, llmRegistry, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
+	parsedJobs, googleConfig, notifierConfig, llmRegistry, sources, sawJobs, legacyInterval, err := parseRuntimeConfig(file)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
 	cfg.Google = googleConfig
 	cfg.Notifier = notifierConfig
 	cfg.LLMs = llmRegistry
+	cfg.Sources = sources
 	if sawJobs {
 		cfg.Jobs = parsedJobs
 	} else if legacyInterval > 0 {
@@ -185,11 +191,12 @@ func (cfg LLMRegistryConfig) Resolve(selector LLMSelector) (LLMConfig, bool) {
 	}, true
 }
 
-func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, LLMRegistryConfig, bool, time.Duration, error) {
+func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, LLMRegistryConfig, SourceConfig, bool, time.Duration, error) {
 	var jobs []JobConfig
 	var current *JobConfig
 	var google GoogleConfig
 	var notifier NotifierConfig
+	sources := SourceConfig{GoogleDocs: map[string]string{}}
 	llmRegistry := LLMRegistryConfig{Providers: map[string]LLMProviderConfig{}}
 	var currentLLMProvider *LLMProviderConfig
 	var sawJobs bool
@@ -205,6 +212,14 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		}
 		if line == "google:" {
 			section = "google"
+			continue
+		}
+		if line == "sources:" {
+			section = "sources"
+			continue
+		}
+		if line == "google_docs:" && section == "sources" {
+			section = "sources.google_docs"
 			continue
 		}
 		if line == "llms:" {
@@ -301,7 +316,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		if !sawJobs && key == "heartbeat_job_interval_seconds" {
 			seconds, err := parsePositiveSeconds(value, "heartbeat_job_interval_seconds")
 			if err != nil {
-				return nil, GoogleConfig{}, NotifierConfig{}, LLMRegistryConfig{}, false, 0, err
+				return nil, GoogleConfig{}, NotifierConfig{}, LLMRegistryConfig{}, SourceConfig{}, false, 0, err
 			}
 			legacyInterval = seconds
 			continue
@@ -317,6 +332,10 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			case "scope_profile":
 				google.ScopeProfile = value
 			}
+			continue
+		}
+		if section == "sources.google_docs" {
+			sources.GoogleDocs[key] = value
 			continue
 		}
 		if section == "llms.default" {
@@ -369,13 +388,13 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		case "enabled":
 			enabled, err := strconv.ParseBool(value)
 			if err != nil {
-				return nil, google, notifier, llmRegistry, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
+				return nil, google, notifier, llmRegistry, sources, true, 0, fmt.Errorf("invalid enabled for job %q: %q", current.Name, value)
 			}
 			current.Enabled = enabled
 		case "interval_seconds":
 			interval, err := parsePositiveSeconds(value, "interval_seconds")
 			if err != nil {
-				return nil, google, notifier, llmRegistry, true, 0, err
+				return nil, google, notifier, llmRegistry, sources, true, 0, err
 			}
 			current.Interval = interval
 			current.intervalSet = true
@@ -386,7 +405,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		case "max_chars":
 			maxChars, err := strconv.Atoi(value)
 			if err != nil {
-				return nil, google, notifier, llmRegistry, true, 0, fmt.Errorf("invalid max_chars for job %q: %q", current.Name, value)
+				return nil, google, notifier, llmRegistry, sources, true, 0, fmt.Errorf("invalid max_chars for job %q: %q", current.Name, value)
 			}
 			current.MaxChars = maxChars
 		case "llm_profile":
@@ -398,7 +417,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, google, notifier, llmRegistry, sawJobs, legacyInterval, err
+		return nil, google, notifier, llmRegistry, sources, sawJobs, legacyInterval, err
 	}
 	if currentLLMProvider != nil {
 		storeLLMProvider(&llmRegistry, *currentLLMProvider)
@@ -406,7 +425,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 	if current != nil {
 		jobs = append(jobs, *current)
 	}
-	return jobs, google, notifier, llmRegistry, sawJobs, legacyInterval, nil
+	return jobs, google, notifier, llmRegistry, sources, sawJobs, legacyInterval, nil
 }
 
 func storeLLMProvider(registry *LLMRegistryConfig, provider LLMProviderConfig) {
@@ -463,6 +482,9 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 		return err
 	}
 	if err := validateLLMRegistryConfig(cfg.LLMs); err != nil {
+		return err
+	}
+	if err := validateSourceConfig(cfg.Sources); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -566,6 +588,18 @@ func validateLLMRegistryConfig(llms LLMRegistryConfig) error {
 		}
 		if len(provider.Models) == 0 {
 			return fmt.Errorf("llm provider profile %q requires at least one model", profileName)
+		}
+	}
+	return nil
+}
+
+func validateSourceConfig(sources SourceConfig) error {
+	for alias, documentID := range sources.GoogleDocs {
+		if strings.TrimSpace(alias) == "" {
+			return fmt.Errorf("google docs source missing alias")
+		}
+		if strings.TrimSpace(documentID) == "" {
+			return fmt.Errorf("google docs source %q missing document id", alias)
 		}
 	}
 	return nil

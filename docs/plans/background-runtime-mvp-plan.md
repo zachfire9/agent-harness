@@ -1194,7 +1194,7 @@ agent-harness status --instance default --json
 
 ## Step 15 — Google Docs read-only source adapter
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-35-google-docs-source`
 - **Pull Request:** TBD
 - **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.

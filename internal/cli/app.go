@@ -262,6 +262,13 @@ func (a App) runService(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func (a App) runGoogle(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "google error: unsupported google command")
+		return 1
+	}
+	if args[0] == "docs" {
+		return a.runGoogleDocs(args[1:], stdout, stderr)
+	}
 	if len(args) < 2 || args[0] != "auth" {
 		fmt.Fprintln(stderr, "google error: unsupported google command")
 		return 1
@@ -277,6 +284,33 @@ func (a App) runGoogle(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "google error: unsupported google auth command")
 		return 1
 	}
+}
+
+func (a App) runGoogleDocs(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) < 2 || args[0] != "read" || strings.TrimSpace(args[1]) == "" {
+		fmt.Fprintln(stderr, "google error: unsupported google docs command")
+		return 1
+	}
+	alias := args[1]
+	opts, err := parseRuntimeOptions(args[2:])
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	paths, cfg, ok := loadGoogleCommandConfig(opts, stderr)
+	if !ok {
+		return 1
+	}
+	doc, err := harnessruntime.ReadGoogleDocSource(context.Background(), paths, cfg, alias)
+	if err != nil {
+		fmt.Fprintf(stderr, "google error: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, doc.Text)
+	if !strings.HasSuffix(doc.Text, "\n") {
+		fmt.Fprintln(stdout)
+	}
+	return 0
 }
 
 func (a App) runGoogleAuthStart(args []string, stdout io.Writer, stderr io.Writer) int {

@@ -280,7 +280,7 @@ google:
 Supported narrow scope profiles:
 
 - `gmail_send`: requests `https://www.googleapis.com/auth/gmail.send` for the Gmail notifier.
-- `docs_readonly`: requests `https://www.googleapis.com/auth/documents.readonly` for a future Google Docs source adapter.
+- `docs_readonly`: requests `https://www.googleapis.com/auth/documents.readonly` for the Google Docs source adapter.
 
 `agent-harness init` creates `config/secrets/` with restricted directory permissions. Store Google client credentials and token files there with `0600` file permissions. These files are local secrets and must not be committed.
 
@@ -303,6 +303,39 @@ agent-harness google auth revoke --instance default --confirm revoke-google-toke
 ```
 
 The auth status/start commands may print safe metadata such as account hint, scope profile, requested scopes, token expiry, and configured paths. They must not print access tokens, refresh tokens, client secrets, authorization codes, or raw credential JSON. Google-backed actions may refresh an expired access token using the saved refresh token and client credentials; refresh failures are reported with controlled status-only errors. To fully revoke cloud-side access, also remove the app from the connected Google account's security settings.
+
+## Configure Google Docs read-only sources
+
+For Google Docs sources, first share the document with the configured Google account, then copy the document ID from its URL:
+
+```text
+https://docs.google.com/document/d/DOC_ID_HERE/edit
+```
+
+Configure local aliases under `sources.google_docs`:
+
+```yaml
+google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scope_profile: "docs_readonly"
+sources:
+  google_docs:
+    vocabulary_doc_id: "DOC_ID_HERE"
+```
+
+Read a configured document source by alias:
+
+```bash
+agent-harness google docs read vocabulary_doc_id --instance default
+```
+
+The command calls the Google Docs API for the configured document ID using the instance's saved OAuth token. It requires the `docs_readonly` scope profile and verifies the token includes `https://www.googleapis.com/auth/documents.readonly`. If the access token is expired and refresh metadata exists, the app refreshes it before reading.
+
+Step 15 intentionally does not search Google Drive by title. Drive discovery would require extra Drive API scope and ambiguity handling. Configure exact document IDs explicitly, then use the read command as a smoke test before wiring future jobs to that source.
+
+The document text is printed to stdout for the explicit read command. It is not written into `state/status.json` or `state/jobs.json`, and errors must not include access tokens, refresh tokens, client secrets, or raw credential JSON.
 
 ## Run a daemon smoke test
 
