@@ -1379,7 +1379,7 @@ The CLI names are illustrative; keep this slice small and prefer tests over broa
 
 - **Status:** Completed
 - **Branch:** `step-38-daily-brief-job`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/40
 - **Concept:** Use the source, progress, scheduler, LLM, and notifier pieces together for the first real daily brief email instead of a generic developer-only digest test.
 
 ### Objective
