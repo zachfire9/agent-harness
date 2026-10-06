@@ -1196,7 +1196,7 @@ agent-harness status --instance default --json
 
 - **Status:** Completed
 - **Branch:** `step-35-google-docs-source`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/37
 - **Concept:** Add read-only document access as a reusable source adapter before building any rich daily-brief or summarization behavior.
 
 ### Objective
