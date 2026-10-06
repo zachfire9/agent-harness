@@ -1247,16 +1247,85 @@ Live verification should use a test/shared document with non-sensitive content f
 
 ---
 
-## Step 16 — First Google-backed scheduled digest job
+## Step 16 — Durable rotating item cursors for document-backed sources
 
 - **Status:** Planned
-- **Branch:** `step-36-google-doc-digest-job`
+- **Branch:** `step-36-durable-rotating-item-cursors`
 - **Pull Request:** TBD
-- **Concept:** Combine the scheduler, Google Docs source adapter, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
+- **Concept:** Add generic durable progress tracking for sources that should emit one item/card at a time across scheduled runs, before wiring that behavior into a delivery job.
 
 ### Objective
 
-Add a narrow scheduled job that reads one configured Google Doc, renders a deterministic short message, and sends it through the configured notifier.
+Add a reusable progress/cursor layer that can select the next item from a parsed source, persist that position across daemon restarts, wrap after the last item, and remain broad enough for vocabulary words, title-plus-bullet cards, quotes, prompts, and other rotating personal-knowledge sources.
+
+### Scope
+
+- Add a small persistent progress store under instance state, conceptually:
+
+  ```text
+  state/progress/<progress-key>.json
+  ```
+
+- Add a generic round-robin selector that operates on parsed item IDs rather than vocabulary-specific records.
+- Support a cycle snapshot model:
+  - parse the source into ordered items/cards at the start of a cycle;
+  - persist the ordered item IDs and cursor;
+  - advance through that snapshot until exhausted;
+  - refresh the snapshot only at the next cycle boundary so doc edits do not unexpectedly skip/repeat items mid-cycle.
+- Add parser primitives for at least:
+  - `non_empty_lines` for simple one-word/one-item-per-line documents;
+  - `heading_with_bullets` or an equivalent card parser that can represent a title plus bullet-point body.
+- Keep parser output generic, conceptually:
+
+  ```json
+  {
+    "id": "perspicacious",
+    "title": "Perspicacious",
+    "body": [
+      "having keen mental perception",
+      "example sentence..."
+    ]
+  }
+  ```
+
+- Advance the cursor only after the caller reports successful delivery or completion; failed sends should retry the same item next time.
+- Store progress metadata and item IDs, not full Google Doc contents or delivered message bodies, in durable state.
+- Keep this step source/selection focused. Do not add the scheduled email/digest job yet, and do not call an LLM.
+
+### Tests
+
+Add deterministic tests for:
+
+- round-robin selection advances from item to item and wraps after the last item;
+- state survives reloads from disk and writes atomically;
+- `non_empty_lines` parsing trims blank lines and creates stable item IDs;
+- title-plus-bullet parsing creates stable cards with title/body fields;
+- snapshot refresh occurs only at cycle boundaries;
+- cursor does not advance when completion/delivery fails;
+- progress state does not persist full source text, credentials, or delivered message bodies.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness progress show vocabulary-word-daily --instance default
+agent-harness sources items preview vocabulary_doc_id --parser non_empty_lines --instance default
+```
+
+The CLI names are illustrative; keep this slice small and prefer tests over broad user-facing commands if the command surface starts to grow.
+
+---
+
+## Step 17 — First Google-backed scheduled digest job
+
+- **Status:** Planned
+- **Branch:** `step-37-google-doc-digest-job`
+- **Pull Request:** TBD
+- **Concept:** Combine the scheduler, Google Docs source adapter, durable rotating item cursors, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
+
+### Objective
+
+Add a narrow scheduled job that reads one configured Google Doc, selects the next parsed item/card with durable round-robin progress, renders a deterministic short message, and sends it through the configured notifier.
 
 ### Scope
 
@@ -1269,23 +1338,29 @@ Add a narrow scheduled job that reads one configured Google Doc, renders a deter
       enabled: true
       interval_seconds: 86400
       source: vocabulary_doc_id
+      parser: non_empty_lines
+      selection:
+        strategy: round_robin
+        progress_key: vocabulary-word-daily
       notifier: default
       max_items: 1
   ```
 
 - Keep rendering deterministic and templated. Do not call an LLM in this step.
 - Use one configured source and a small bounded output so delivery can be verified safely.
-- Record normal job metadata in `state/jobs.json` but do not store full document content or full delivered message there.
-- Keep this separate from a full daily brief. Additional sections, rotations, enrichment, model polish, and multiple source documents should be later steps.
+- Record normal job metadata in `state/jobs.json` and progress metadata in `state/progress/`, but do not store full document content or full delivered message there.
+- Advance the progress cursor only after the notifier reports success.
+- Keep this separate from a full daily brief. Additional sections, enrichment, model polish, and multiple source documents should be later steps.
 
 ### Tests
 
 Add deterministic tests for:
 
 - configured Google Doc digest job reads through the source interface;
+- digest selects the next item/card through the durable progress layer;
 - digest rendering is bounded and deterministic;
 - notifier receives the expected compact message through a fake notifier;
-- source/notifier failures are recorded as failed job state with secret-safe errors;
+- source/notifier failures are recorded as failed job state with secret-safe errors and do not advance progress;
 - disabled digest jobs do not fetch Docs or send notifications;
 - no model calls are made.
 
