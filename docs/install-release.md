@@ -139,19 +139,22 @@ systemctl --user restart agent-harness@default.service
 
 ## Publishing a release
 
-For the current manual release process:
+Publishing is automated by GitHub Actions when a version tag is pushed.
+Use a `v<version>` tag; the workflow strips the leading `v` for the embedded binary version and artifact names.
 
 ```bash
 VERSION=0.1.0
 
 git tag "v${VERSION}"
-./scripts/build-release.sh "${VERSION}"
-gh release create "v${VERSION}" \
-  dist/agent-harness_${VERSION}_linux_amd64.tar.gz \
-  dist/agent-harness_${VERSION}_linux_arm64.tar.gz \
-  dist/checksums.txt \
-  --title "v${VERSION}" \
-  --generate-notes
+git push origin "v${VERSION}"
+```
+
+The release workflow runs `go test ./...`, builds Linux `amd64` and `arm64` archives with `scripts/build-release.sh`, verifies `dist/checksums.txt`, and publishes these GitHub Release assets:
+
+```text
+agent-harness_${VERSION}_linux_amd64.tar.gz
+agent-harness_${VERSION}_linux_arm64.tar.gz
+checksums.txt
 ```
 
 Development rules:
@@ -162,7 +165,7 @@ Development rules:
 - Upload `checksums.txt` with every release.
 - Target machines should not need Go or a source checkout.
 - Instance homes must stay separate from binary and version storage.
-- Publishing is manual for now; a later step can move this into GitHub Actions on tag push.
+- Release publishing is automated from tag pushes; do not run ad hoc manual release uploads unless recovering from a failed release.
 
 ## Development install from source
 

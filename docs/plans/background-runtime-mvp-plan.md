@@ -980,7 +980,7 @@ Live verification may use a cheap/default model profile and the dedicated agent 
 
 ## Step 12 — Local background service for scheduled AI email
 
-- **Status:** In Progress
+- **Status:** Completed
 - **Branch:** `step-32-local-ai-email-service`
 - **Pull Request:** https://github.com/zachfire9/agent-harness/pull/34
 - **Concept:** Install and run the app as a local background service on the agent machine with a real scheduled AI-email job.
@@ -1113,9 +1113,9 @@ Live verification can use a near-future wall-clock time with a harmless local/fi
 
 ## Step 14 — Automated GitHub release binaries
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-34-automated-release-binaries`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/36
 - **Concept:** Once the LLM email functionality works end-to-end and can be scheduled at a real daily time, publish the first versioned app binary so installs can use downloaded release artifacts instead of a source checkout and local `go build`.
 
 ### Objective
