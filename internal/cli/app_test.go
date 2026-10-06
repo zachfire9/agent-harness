@@ -1142,7 +1142,9 @@ func TestRunGoogleAuthStartPrintsSecretSafeScopeInstructions(t *testing.T) {
   client_credentials_path: "config/secrets/google-client.json"
   token_path: "config/secrets/google-token.json"
   account_hint: "agent@example.com"
-  scope_profile: "docs_readonly"
+  scopes:
+    - gmail_send
+    - docs_readonly
 `)
 	writeCLITestFile(t, home, "config/secrets/google-client.json", `{"installed":{"client_id":"fake-client-id","client_secret":"super-secret-client-secret"}}`)
 
@@ -1154,10 +1156,13 @@ func TestRunGoogleAuthStartPrintsSecretSafeScopeInstructions(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	for _, want := range []string{"google auth start", "account_hint: agent@example.com", "scope_profile: docs_readonly", "https://www.googleapis.com/auth/documents.readonly", "client_credentials_path: config/secrets/google-client.json", "token_path: config/secrets/google-token.json"} {
+	for _, want := range []string{"google auth start", "account_hint: agent@example.com", "scope_alias: gmail_send", "scope_alias: docs_readonly", "https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/documents.readonly", "client_credentials_path: config/secrets/google-client.json", "token_path: config/secrets/google-token.json"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected auth start output to contain %q, got %q", want, stdout)
 		}
+	}
+	if strings.Contains(stdout, "scope_profile:") {
+		t.Fatalf("scopes list auth start should not render legacy scope_profile, got %q", stdout)
 	}
 	if strings.Contains(stdout, "super-secret-client-secret") || strings.Contains(stdout, "client_secret") {
 		t.Fatalf("auth start should not print client secret material, got %q", stdout)

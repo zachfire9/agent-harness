@@ -1249,9 +1249,9 @@ Live verification should use a test/shared document with non-sensitive content f
 
 ## Step 16 — Google OAuth scopes list config
 
-- **Status:** Planned
+- **Status:** Completed
 - **Branch:** `step-36-google-scopes-list-config`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/38
 - **Concept:** Replace the single `scope_profile` setting with a composable scopes list for Google OAuth token generation, while keeping the existing profile key as backward-compatible config.
 
 ### Objective

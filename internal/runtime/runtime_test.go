@@ -562,7 +562,7 @@ jobs:
 	}
 }
 
-func TestReadRuntimeConfigRejectsGmailNotifierWithoutGmailScope(t *testing.T) {
+func TestReadRuntimeConfigAllowsGmailNotifierRegardlessOfConfiguredAuthScopes(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
@@ -572,7 +572,8 @@ func TestReadRuntimeConfigRejectsGmailNotifierWithoutGmailScope(t *testing.T) {
 	}
 	config := `google:
   token_path: "config/secrets/google-token.json"
-  scope_profile: "docs_readonly"
+  scopes:
+    - docs_readonly
 notifier:
   type: gmail
   gmail:
@@ -584,9 +585,12 @@ notifier:
 		t.Fatalf("write config failed: %v", err)
 	}
 
-	_, err = ReadRuntimeConfig(paths)
-	if err == nil || !strings.Contains(err.Error(), "gmail notifier requires google scope_profile gmail_send") {
-		t.Fatalf("expected gmail scope validation error, got %v", err)
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("gmail notifier config should not treat requested auth scopes as proof of runtime permission: %v", err)
+	}
+	if cfg.Notifier.Type != "gmail" {
+		t.Fatalf("expected gmail notifier config, got %#v", cfg.Notifier)
 	}
 }
 
@@ -1242,7 +1246,47 @@ func TestRunDaemonRecordsConfigErrorForInvalidJobConfig(t *testing.T) {
 	}
 }
 
-func TestReadRuntimeConfigParsesGoogleConfig(t *testing.T) {
+func TestReadRuntimeConfigParsesGoogleScopesList(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scopes:
+    - gmail_send
+    - docs_readonly
+jobs:
+  - name: heartbeat
+    type: heartbeat
+    enabled: true
+    interval_seconds: 60
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if cfg.Google.ClientCredentialsPath != "config/secrets/google-client.json" || cfg.Google.TokenPath != "config/secrets/google-token.json" || cfg.Google.AccountHint != "agent@example.com" {
+		t.Fatalf("unexpected google config: %#v", cfg.Google)
+	}
+	if !sameStrings(cfg.Google.ScopeAliases, []string{"gmail_send", "docs_readonly"}) {
+		t.Fatalf("unexpected google scope aliases: %#v", cfg.Google.ScopeAliases)
+	}
+	if !sameStrings(cfg.Google.Scopes(), []string{GoogleScopeGmailSend, GoogleScopeDocsReadonly}) {
+		t.Fatalf("unexpected google concrete scopes: %#v", cfg.Google.Scopes())
+	}
+}
+
+func TestReadRuntimeConfigKeepsLegacyGoogleScopeProfile(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
@@ -1269,11 +1313,38 @@ jobs:
 	if err != nil {
 		t.Fatalf("read runtime config failed: %v", err)
 	}
-	if cfg.Google.ClientCredentialsPath != "config/secrets/google-client.json" || cfg.Google.TokenPath != "config/secrets/google-token.json" || cfg.Google.AccountHint != "agent@example.com" || cfg.Google.ScopeProfile != "gmail_send" {
-		t.Fatalf("unexpected google config: %#v", cfg.Google)
+	if cfg.Google.ScopeProfile != "gmail_send" || len(cfg.Google.ScopeAliases) != 0 {
+		t.Fatalf("unexpected legacy google config: %#v", cfg.Google)
 	}
-	if got := cfg.Google.Scopes(); len(got) != 1 || got[0] != GoogleScopeGmailSend {
-		t.Fatalf("unexpected gmail scopes: %#v", got)
+	if !sameStrings(cfg.Google.Scopes(), []string{GoogleScopeGmailSend}) {
+		t.Fatalf("unexpected legacy gmail scopes: %#v", cfg.Google.Scopes())
+	}
+}
+
+func TestReadRuntimeConfigGoogleScopesOverrideScopeProfile(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  token_path: "config/secrets/google-token.json"
+  scope_profile: "gmail_send"
+  scopes:
+    - docs_readonly
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfg, err := ReadRuntimeConfig(paths)
+	if err != nil {
+		t.Fatalf("read runtime config failed: %v", err)
+	}
+	if !sameStrings(cfg.Google.Scopes(), []string{GoogleScopeDocsReadonly}) {
+		t.Fatalf("expected scopes list to override scope_profile, got %#v", cfg.Google.Scopes())
 	}
 }
 
@@ -1297,6 +1368,31 @@ func TestReadRuntimeConfigRejectsUnknownGoogleScopeProfile(t *testing.T) {
 	_, err = ReadRuntimeConfig(paths)
 	if err == nil || !strings.Contains(err.Error(), `unknown google scope_profile "drive_all"`) {
 		t.Fatalf("expected unknown google scope error, got %v", err)
+	}
+}
+
+func TestReadRuntimeConfigRejectsUnknownGoogleScopeAlias(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := InitInstance(paths); err != nil {
+		t.Fatalf("init instance failed: %v", err)
+	}
+	config := `google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  scopes:
+    - gmail_send
+    - drive_all
+`
+	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	_, err = ReadRuntimeConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), `unknown google scope alias "drive_all"`) {
+		t.Fatalf("expected unknown google scope alias error, got %v", err)
 	}
 }
 
@@ -1447,6 +1543,18 @@ func TestSystemdUserUnitUsesInstanceHomeAndNoMachineSpecificPaths(t *testing.T) 
 	if strings.Contains(unit, "/home/") {
 		t.Fatalf("unit must not contain machine-specific home paths:\n%s", unit)
 	}
+}
+
+func sameStrings(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func writeRuntimeTestFile(t *testing.T, root string, relativePath string, content string) {

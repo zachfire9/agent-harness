@@ -214,6 +214,10 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			section = "google"
 			continue
 		}
+		if line == "scopes:" && section == "google" {
+			section = "google.scopes"
+			continue
+		}
 		if line == "sources:" {
 			section = "sources"
 			continue
@@ -264,6 +268,13 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			continue
 		}
 		if strings.HasPrefix(line, "- ") {
+			if section == "google.scopes" {
+				alias := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "- ")), `"'`)
+				if alias != "" {
+					google.ScopeAliases = append(google.ScopeAliases, alias)
+				}
+				continue
+			}
 			if section == "llms.providers.models" && !strings.HasPrefix(raw, "        - ") {
 				section = "llms.providers"
 			}
@@ -642,9 +653,6 @@ func validateNotifierConfig(notifier NotifierConfig, google GoogleConfig) error 
 	case "", "file_outbox":
 		return nil
 	case "gmail":
-		if google.ScopeProfile != GoogleScopeProfileGmailSend {
-			return fmt.Errorf("gmail notifier requires google scope_profile gmail_send")
-		}
 		if strings.TrimSpace(notifier.Gmail.From) == "" {
 			return fmt.Errorf("gmail notifier from is required")
 		}

@@ -52,9 +52,6 @@ func readGoogleDocSourceWithClient(ctx context.Context, paths Paths, cfg Runtime
 	if documentID == "" {
 		return GoogleDocSource{}, fmt.Errorf("unknown google docs source %q", alias)
 	}
-	if cfg.Google.ScopeProfile != GoogleScopeProfileDocsReadonly {
-		return GoogleDocSource{}, fmt.Errorf("google docs source requires google scope_profile docs_readonly")
-	}
 	if client == nil {
 		client = http.DefaultClient
 	}
