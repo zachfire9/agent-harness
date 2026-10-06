@@ -65,8 +65,8 @@ func readGoogleDocSourceWithClient(ctx context.Context, paths Paths, cfg Runtime
 	if err != nil {
 		return GoogleDocSource{}, err
 	}
-	if !googleTokenHasScope(token.Scope, GoogleScopeDocsReadonly) {
-		return GoogleDocSource{}, fmt.Errorf("google token is missing required documents.readonly scope")
+	if !googleTokenHasAnyScope(token.Scope, GoogleScopeDocsReadonly, GoogleScopeDocuments) {
+		return GoogleDocSource{}, fmt.Errorf("google token is missing required documents.readonly or documents scope")
 	}
 	if strings.TrimSpace(token.AccessToken) == "" {
 		return GoogleDocSource{}, fmt.Errorf("google token is missing access token")
@@ -98,9 +98,13 @@ func readGoogleDocSourceWithClient(ctx context.Context, paths Paths, cfg Runtime
 	}, nil
 }
 
-func googleTokenHasScope(scopeList string, want string) bool {
+func googleTokenHasAnyScope(scopeList string, wants ...string) bool {
+	wanted := map[string]bool{}
+	for _, want := range wants {
+		wanted[want] = true
+	}
 	for _, scope := range strings.Fields(scopeList) {
-		if scope == want {
+		if wanted[scope] {
 			return true
 		}
 	}

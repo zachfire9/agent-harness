@@ -331,7 +331,7 @@ Read a configured document source by alias:
 agent-harness google docs read vocabulary_doc_id --instance default
 ```
 
-The command calls the Google Docs API for the configured document ID using the instance's saved OAuth token. It requires the `docs_readonly` scope profile and verifies the token includes `https://www.googleapis.com/auth/documents.readonly`. If the access token is expired and refresh metadata exists, the app refreshes it before reading.
+The command calls the Google Docs API for the configured document ID using the instance's saved OAuth token. It requires the `docs_readonly` scope profile and accepts a token that includes either `https://www.googleapis.com/auth/documents.readonly` or the broader `https://www.googleapis.com/auth/documents` scope. If the access token is expired and refresh metadata exists, the app refreshes it before reading.
 
 Step 15 intentionally does not search Google Drive by title. Drive discovery would require extra Drive API scope and ambiguity handling. Configure exact document IDs explicitly, then use the read command as a smoke test before wiring future jobs to that source.
 

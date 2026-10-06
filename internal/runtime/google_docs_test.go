@@ -78,6 +78,28 @@ func TestReadGoogleDocSourceUsesConfiguredDocIDAndReadonlyScope(t *testing.T) {
 	}
 }
 
+func TestReadGoogleDocSourceAllowsBroadDocumentsScope(t *testing.T) {
+	paths := PathsForHome(filepath.Join(t.TempDir(), "default"))
+	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-token.json", `{"access_token":"ya29.docs-token","scope":"https://www.googleapis.com/auth/documents","expiry":"2099-01-02T03:04:05Z"}`)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, `{"title":"Vocabulary","body":{"content":[{"paragraph":{"elements":[{"textRun":{"content":"Broad docs text"}}]}}]}}`)
+	}))
+	defer server.Close()
+
+	cfg := RuntimeConfig{
+		Google:  GoogleConfig{TokenPath: "config/secrets/google-token.json", ScopeProfile: "docs_readonly"},
+		Sources: SourceConfig{GoogleDocs: map[string]string{"vocabulary_doc_id": "doc-vocabulary-123"}},
+	}
+	doc, err := readGoogleDocSourceWithClient(context.Background(), paths, cfg, "vocabulary_doc_id", http.DefaultClient, server.URL, defaultGoogleOAuthTokenEndpoint)
+	if err != nil {
+		t.Fatalf("expected broad documents scope to be accepted for docs read, got %v", err)
+	}
+	if doc.Text != "Broad docs text" {
+		t.Fatalf("unexpected text: %q", doc.Text)
+	}
+}
+
 func TestReadGoogleDocSourceRejectsUnknownAliasAndWrongScope(t *testing.T) {
 	paths := PathsForHome(filepath.Join(t.TempDir(), "default"))
 	writeRuntimeTestFile(t, paths.Home, "config/secrets/google-token.json", `{"access_token":"ya29.docs-token","scope":"https://www.googleapis.com/auth/gmail.send","expiry":"2099-01-02T03:04:05Z"}`)
@@ -92,7 +114,7 @@ func TestReadGoogleDocSourceRejectsUnknownAliasAndWrongScope(t *testing.T) {
 	}
 
 	_, err = readGoogleDocSourceWithClient(context.Background(), paths, cfg, "vocabulary_doc_id", http.DefaultClient, "https://docs.example", defaultGoogleOAuthTokenEndpoint)
-	if err == nil || !strings.Contains(err.Error(), "google token is missing required documents.readonly scope") {
+	if err == nil || !strings.Contains(err.Error(), "google token is missing required documents.readonly or documents scope") {
 		t.Fatalf("expected missing docs scope error, got %v", err)
 	}
 }
