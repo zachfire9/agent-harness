@@ -46,8 +46,9 @@ The project currently has:
 - a configurable scheduled-job registry with interval and daily time-of-day schedules, a default heartbeat job, a local check-in job, notification test jobs, and bounded AI email jobs that can be inspected or manually triggered from the CLI
 - Google account connection metadata commands for secret-safe auth status, composable scope-alias inspection, local token revocation, and access-token refresh for Google-backed actions
 - a Google Docs read-only source adapter that reads explicitly configured document IDs by local alias
-- durable rotating item cursor primitives for document-backed sources, including line and heading-plus-bullet parsers
-- a Gmail send-only notifier adapter for notification jobs, backed by the same notifier interface as the safe local file outbox
+- durable rotating item cursor primitives for document-backed sources, including line and heading-based parsers
+- a first `daily_brief` job that reads a rotating vocabulary word from Google Docs, asks the configured LLM for the full brief body, sends via the notifier, and advances progress only after successful delivery
+- a Gmail send-only notifier adapter for notification jobs, backed by the same notifier interface
 
 ## Project layout
 

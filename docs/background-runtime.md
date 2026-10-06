@@ -240,6 +240,58 @@ jobs:
 
 `api_key_env` names an environment variable in a provider/profile entry; raw API keys must not be stored in `config/config.yaml`, and job entries should only reference provider/profile/model selectors. By default, the profile name is the provider name; if you configure the same provider more than once, use an explicit `profile`. `provider` currently supports `openrouter`, `openai`, or `openai_compatible` with `base_url`. Job state records success/failure metadata only; it does not store the prompt, generated email body, API key, or raw provider response.
 
+### Daily brief jobs
+
+The `daily_brief` job type composes the first real daily brief slice: a deterministic birthday countdown followed by one rotating vocabulary word from a configured Google Doc. The app selects the next word through durable progress state, sends one LLM request with the selected word and countdown context, delivers the LLM-returned fully formatted body through the configured notifier, and advances progress only after delivery succeeds.
+
+Example:
+
+```yaml
+google:
+  client_credentials_path: "config/secrets/google-client.json"
+  token_path: "config/secrets/google-token.json"
+  account_hint: "agent@example.com"
+  scopes:
+    - gmail_send
+    - docs_readonly
+llms:
+  default:
+    provider: openai
+    model: "gpt-4o-mini"
+  providers:
+    - provider: openai
+      api_key_env: OPENAI_API_KEY
+      models:
+        - "gpt-4o-mini"
+notifier:
+  type: gmail
+  gmail:
+    from: "agent@example.com"
+    to:
+      - "operator@example.com"
+    subject_prefix: "[agent-harness]"
+sources:
+  google_docs:
+    vocabulary_doc_id: "GOOGLE_DOC_ID"
+jobs:
+  - name: daily-brief
+    type: daily_brief
+    enabled: true
+    schedule:
+      daily_at: "08:00"
+      timezone: "America/New_York"
+    birthday:
+      label: "Zach's 80th birthday"
+      date: "2063-10-28"
+    vocabulary:
+      source: vocabulary_doc_id
+      parser: non_empty_lines
+      progress_key: vocabulary-daily-brief
+    max_chars: 1200
+```
+
+The vocabulary source expects one word or phrase per non-empty line. The birthday date calculation, source selection, cursor persistence, and delivery success/failure handling stay deterministic in code. The LLM is responsible only for the definition, example sentence, and final body formatting. `state/progress/<progress_key>.json` stores cursor metadata and item IDs, not document contents, prompts, generated email bodies, tokens, or API keys.
+
 ## Inspect and manually run jobs
 
 List configured jobs without needing a long-running daemon:

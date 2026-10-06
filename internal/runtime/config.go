@@ -64,10 +64,24 @@ type JobConfig struct {
 	MaxChars    int
 	OutputPath  string
 	OutboxPath  string
+	Birthday    BirthdayBriefConfig
+	Vocabulary  VocabularyBriefConfig
 	Notifier    NotifierConfig
 	Google      GoogleConfig
+	Sources     SourceConfig
 	LLMOverride LLMSelector
 	LLM         LLMConfig
+}
+
+type BirthdayBriefConfig struct {
+	Label string
+	Date  string
+}
+
+type VocabularyBriefConfig struct {
+	Source      string
+	Parser      string
+	ProgressKey string
 }
 
 type JobSchedule struct {
@@ -151,6 +165,7 @@ func (cfg *RuntimeConfig) attachNotifierToJobs() {
 	for i := range cfg.Jobs {
 		cfg.Jobs[i].Notifier = cfg.Notifier
 		cfg.Jobs[i].Google = cfg.Google
+		cfg.Jobs[i].Sources = cfg.Sources
 		if resolved, ok := cfg.LLMs.Resolve(cfg.Jobs[i].LLMOverride); ok {
 			cfg.Jobs[i].LLM = resolved
 		}
@@ -245,6 +260,12 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		if section == "jobs.schedule" && !strings.HasPrefix(raw, "      ") {
 			section = "jobs"
 		}
+		if section == "jobs.birthday" && !strings.HasPrefix(raw, "      ") {
+			section = "jobs"
+		}
+		if section == "jobs.vocabulary" && !strings.HasPrefix(raw, "      ") {
+			section = "jobs"
+		}
 		if line == "llm:" && section == "jobs" && current != nil {
 			section = "jobs.llm"
 			continue
@@ -252,6 +273,14 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		if line == "schedule:" && section == "jobs" && current != nil {
 			section = "jobs.schedule"
 			current.Interval = 0
+			continue
+		}
+		if line == "birthday:" && section == "jobs" && current != nil {
+			section = "jobs.birthday"
+			continue
+		}
+		if line == "vocabulary:" && section == "jobs" && current != nil {
+			section = "jobs.vocabulary"
 			continue
 		}
 		if line == "notifier:" {
@@ -304,7 +333,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				}
 				continue
 			}
-			if section != "jobs" && section != "jobs.llm" && section != "jobs.schedule" {
+			if section != "jobs" && section != "jobs.llm" && section != "jobs.schedule" && section != "jobs.birthday" && section != "jobs.vocabulary" {
 				continue
 			}
 			section = "jobs"
@@ -385,6 +414,26 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				current.Schedule.DailyAt = value
 			case "timezone":
 				current.Schedule.Timezone = value
+			}
+			continue
+		}
+		if section == "jobs.birthday" {
+			switch key {
+			case "label":
+				current.Birthday.Label = value
+			case "date":
+				current.Birthday.Date = value
+			}
+			continue
+		}
+		if section == "jobs.vocabulary" {
+			switch key {
+			case "source":
+				current.Vocabulary.Source = value
+			case "parser":
+				current.Vocabulary.Parser = value
+			case "progress_key":
+				current.Vocabulary.ProgressKey = value
 			}
 			continue
 		}
@@ -507,7 +556,7 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 			return fmt.Errorf("duplicate job name %q", job.Name)
 		}
 		seen[job.Name] = true
-		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" && job.Type != "ai_email" {
+		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" && job.Type != "ai_email" && job.Type != "daily_brief" {
 			return fmt.Errorf("unknown job type %q for job %q", job.Type, job.Name)
 		}
 		if err := validateJobSchedule(job); err != nil {
@@ -532,6 +581,14 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 			}
 			if provider, ok := cfg.LLMs.Providers[job.ResolvedLLM().Profile]; ok && !stringInSlice(job.ResolvedLLM().Model, provider.Models) {
 				return fmt.Errorf("ai_email job %q model %q is not listed for llm provider/profile %q", job.Name, job.ResolvedLLM().Model, job.ResolvedLLM().Profile)
+			}
+		}
+		if job.Type == "daily_brief" {
+			if err := validateDailyBriefJobConfig(job, cfg); err != nil {
+				return err
+			}
+			if provider, ok := cfg.LLMs.Providers[job.ResolvedLLM().Profile]; ok && !stringInSlice(job.ResolvedLLM().Model, provider.Models) {
+				return fmt.Errorf("daily_brief job %q model %q is not listed for llm provider/profile %q", job.Name, job.ResolvedLLM().Model, job.ResolvedLLM().Profile)
 			}
 		}
 	}
@@ -644,6 +701,47 @@ func validateAIEmailJobConfig(job JobConfig) error {
 	}
 	if strings.TrimSpace(llmConfig.APIKeyEnv) == "" {
 		return fmt.Errorf("ai_email job %q requires llm api_key_env", job.Name)
+	}
+	return nil
+}
+
+func validateDailyBriefJobConfig(job JobConfig, cfg RuntimeConfig) error {
+	if strings.TrimSpace(job.Birthday.Label) == "" {
+		return fmt.Errorf("daily_brief job %q requires birthday label", job.Name)
+	}
+	if _, err := time.Parse("2006-01-02", job.Birthday.Date); err != nil {
+		return fmt.Errorf("daily_brief job %q requires birthday date in YYYY-MM-DD format", job.Name)
+	}
+	if strings.TrimSpace(job.Vocabulary.Source) == "" {
+		return fmt.Errorf("daily_brief job %q requires vocabulary source", job.Name)
+	}
+	if strings.TrimSpace(cfg.Sources.GoogleDocs[job.Vocabulary.Source]) == "" {
+		return fmt.Errorf("daily_brief job %q references unknown vocabulary source %q", job.Name, job.Vocabulary.Source)
+	}
+	if strings.TrimSpace(job.Vocabulary.Parser) == "" {
+		return fmt.Errorf("daily_brief job %q requires vocabulary parser", job.Name)
+	}
+	if job.Vocabulary.Parser != ProgressParserNonEmptyLines {
+		return fmt.Errorf("daily_brief job %q unsupported vocabulary parser %q", job.Name, job.Vocabulary.Parser)
+	}
+	if strings.TrimSpace(job.Vocabulary.ProgressKey) == "" {
+		return fmt.Errorf("daily_brief job %q requires vocabulary progress_key", job.Name)
+	}
+	if job.MaxChars <= 0 {
+		return fmt.Errorf("daily_brief job %q requires positive max_chars", job.Name)
+	}
+	llmConfig := job.ResolvedLLM()
+	if !job.LLMOverride.IsZero() && llmConfig.IsZero() {
+		return fmt.Errorf("daily_brief job %q references unknown llm provider/profile", job.Name)
+	}
+	if strings.TrimSpace(llmConfig.Provider) == "" {
+		return fmt.Errorf("daily_brief job %q requires llm provider", job.Name)
+	}
+	if strings.TrimSpace(llmConfig.Model) == "" {
+		return fmt.Errorf("daily_brief job %q requires llm model", job.Name)
+	}
+	if strings.TrimSpace(llmConfig.APIKeyEnv) == "" {
+		return fmt.Errorf("daily_brief job %q requires llm api_key_env", job.Name)
 	}
 	return nil
 }

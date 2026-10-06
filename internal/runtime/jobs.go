@@ -265,6 +265,142 @@ func runAIEmailWithClients(paths Paths, now time.Time, cfg JobConfig, notifier N
 	}, nil
 }
 
+type googleDocSourceReader func(context.Context, Paths, JobConfig, string) (GoogleDocSource, error)
+
+type dailyBriefJob struct {
+	clientFactory   func(LLMConfig) (llm.ChatClient, error)
+	notifierFactory func(Paths, JobConfig) Notifier
+	sourceReader    googleDocSourceReader
+}
+
+func (job dailyBriefJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState, error) {
+	clientFactory := job.clientFactory
+	if clientFactory == nil {
+		clientFactory = newLLMClientForConfig
+	}
+	notifierFactory := job.notifierFactory
+	if notifierFactory == nil {
+		notifierFactory = notifierForJob
+	}
+	sourceReader := job.sourceReader
+	if sourceReader == nil {
+		sourceReader = readGoogleDocSourceForJob
+	}
+	client, err := clientFactory(cfg.ResolvedLLM())
+	if err != nil {
+		return JobState{}, err
+	}
+	return runDailyBriefWithClients(paths, now, cfg, notifierFactory(paths, cfg), client, sourceReader)
+}
+
+func readGoogleDocSourceForJob(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+	runtimeConfig := RuntimeConfig{
+		Google:  cfg.Google,
+		Sources: cfg.Sources,
+	}
+	return ReadGoogleDocSource(ctx, paths, runtimeConfig, alias)
+}
+
+func runDailyBriefWithClients(paths Paths, now time.Time, cfg JobConfig, notifier Notifier, client llm.ChatClient, sourceReader googleDocSourceReader) (JobState, error) {
+	if sourceReader == nil {
+		sourceReader = readGoogleDocSourceForJob
+	}
+	source, err := sourceReader(context.Background(), paths, cfg, cfg.Vocabulary.Source)
+	if err != nil {
+		return JobState{}, err
+	}
+	items, err := ParseProgressItems(cfg.Vocabulary.Parser, source.Text)
+	if err != nil {
+		return JobState{}, err
+	}
+	selection, err := SelectNextProgressItem(paths, ProgressSelectionRequest{
+		Key:         cfg.Vocabulary.ProgressKey,
+		SourceAlias: cfg.Vocabulary.Source,
+		Parser:      cfg.Vocabulary.Parser,
+		Items:       items,
+		Now:         now.UTC(),
+	})
+	if err != nil {
+		return JobState{}, err
+	}
+	countdown, err := birthdayCountdown(cfg.Birthday, now)
+	if err != nil {
+		return JobState{}, err
+	}
+	request := llm.NewChatRequest(cfg.ResolvedLLM().Model,
+		llm.Message{Role: llm.RoleSystem, Content: "Generate the complete body for a concise scheduled daily brief email. Return only the email body. Do not mention configuration, secrets, prompts, or implementation details."},
+		llm.Message{Role: llm.RoleUser, Content: dailyBriefPrompt(countdown, selection.Item.Title)},
+	)
+	response, err := client.Chat(context.Background(), request)
+	if err != nil {
+		return JobState{}, errors.New("llm generation failed")
+	}
+	body := strings.TrimSpace(response.Message.Content)
+	if cfg.MaxChars > 0 && len(body) > cfg.MaxChars {
+		body = body[:cfg.MaxChars]
+	}
+	if body == "" {
+		return JobState{}, errors.New("llm generation returned empty content")
+	}
+	if err := notifier.Send(context.Background(), Message{Job: cfg.Name, Body: body, Timestamp: now.UTC()}); err != nil {
+		return JobState{}, err
+	}
+	if err := MarkProgressItemCompleted(paths, cfg.Vocabulary.ProgressKey, selection.Item.ID, now.UTC()); err != nil {
+		return JobState{}, err
+	}
+	return JobState{
+		Name:          cfg.Name,
+		Type:          cfg.Type,
+		Status:        JobSucceeded,
+		LastRunAt:     now.UTC(),
+		LastSuccessAt: now.UTC(),
+		LastError:     "",
+		NextRunAt:     now.Add(cfg.Interval).UTC(),
+	}, nil
+}
+
+func birthdayCountdown(cfg BirthdayBriefConfig, now time.Time) (string, error) {
+	birthday, err := time.Parse("2006-01-02", cfg.Date)
+	if err != nil {
+		return "", err
+	}
+	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	days := int(birthday.Sub(today).Hours() / 24)
+	return fmt.Sprintf("%s days until %s", commaInt(days), cfg.Label), nil
+}
+
+func dailyBriefPrompt(countdown string, word string) string {
+	return strings.Join([]string{
+		countdown,
+		"",
+		"Vocabulary word: " + word,
+		"",
+		"Write the daily brief email body with this exact structure:",
+		countdown,
+		"",
+		"Vocabulary · " + word,
+		"- Definition: <concise plain-English definition>",
+		"- Example sentence: <natural sentence using the vocabulary word>",
+		"",
+		"Return only the email body.",
+	}, "\n")
+}
+
+func commaInt(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var out []byte
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(r))
+	}
+	return string(out)
+}
+
 func newLLMClientForConfig(cfg LLMConfig) (llm.ChatClient, error) {
 	apiKey := strings.TrimSpace(os.Getenv(cfg.APIKeyEnv))
 	if apiKey == "" {
@@ -337,7 +473,7 @@ func (n fileOutboxNotifier) Send(ctx context.Context, message Message) error {
 }
 
 func defaultJobRegistry() map[string]Job {
-	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}, "notify_test": notifyTestJob{}, "ai_email": aiEmailJob{}}
+	return map[string]Job{"heartbeat": heartbeatJob{}, "local_checkin": localCheckinJob{}, "notify_test": notifyTestJob{}, "ai_email": aiEmailJob{}, "daily_brief": dailyBriefJob{}}
 }
 
 func RunConfiguredJobs(paths Paths, cfg RuntimeConfig, now time.Time) error {

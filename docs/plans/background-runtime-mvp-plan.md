@@ -1375,64 +1375,67 @@ The CLI names are illustrative; keep this slice small and prefer tests over broa
 
 ---
 
-## Step 18 — First Google-backed scheduled digest job
+## Step 18 — First real daily brief job
 
-- **Status:** Planned
-- **Branch:** `step-38-google-doc-digest-job`
+- **Status:** Completed
+- **Branch:** `step-38-daily-brief-job`
 - **Pull Request:** TBD
-- **Concept:** Combine the scheduler, Google Docs source adapter, durable rotating item cursors, and notifier with a small deterministic digest before introducing richer daily-brief logic or model calls.
+- **Concept:** Use the source, progress, scheduler, LLM, and notifier pieces together for the first real daily brief email instead of a generic developer-only digest test.
 
 ### Objective
 
-Add a narrow scheduled job that reads one configured Google Doc, selects the next parsed item/card with durable round-robin progress, renders a deterministic short message, and sends it through the configured notifier.
+Add a `daily_brief` scheduled job that sends a bounded daily email containing a deterministic birthday countdown followed by a rotating vocabulary section from a configured Google Doc. The selected vocabulary word is passed to the configured LLM once, and the LLM returns the fully formatted email body.
 
 ### Scope
 
-- Add a job type such as `google_doc_digest`, conceptually:
+- Add a `daily_brief` job type, conceptually:
 
   ```yaml
   jobs:
-    - name: vocabulary-digest
-      type: google_doc_digest
+    - name: daily-brief
+      type: daily_brief
       enabled: true
-      interval_seconds: 86400
-      source: vocabulary_doc_id
-      parser: non_empty_lines
-      selection:
-        strategy: round_robin
-        progress_key: vocabulary-word-daily
-      notifier: default
-      max_items: 1
+      schedule:
+        daily_at: "08:00"
+        timezone: "America/New_York"
+      birthday:
+        label: "Zach's 80th birthday"
+        date: "2063-10-28"
+      vocabulary:
+        source: vocabulary_doc_id
+        parser: non_empty_lines
+        progress_key: vocabulary-daily-brief
+      max_chars: 1200
   ```
 
-- Keep rendering deterministic and templated. Do not call an LLM in this step.
-- Use one configured source and a small bounded output so delivery can be verified safely.
-- Record normal job metadata in `state/jobs.json` and progress metadata in `state/progress/`, but do not store full document content or full delivered message there.
-- Advance the progress cursor only after the notifier reports success.
-- Keep this separate from a full daily brief. Additional sections, enrichment, model polish, and multiple source documents should be later steps.
+- Keep the birthday countdown deterministic in code; do not ask the LLM to compute dates.
+- Select exactly one vocabulary word from the configured Google Doc using the durable round-robin progress layer.
+- Make one LLM call with the selected word and countdown context; the LLM should produce the complete email body with the birthday countdown first and the vocabulary section second.
+- Send via the configured notifier and advance the progress cursor only after the notifier reports success.
+- Record normal job metadata in `state/jobs.json` and progress metadata in `state/progress/`, but do not store full document content, prompts, generated message bodies, or credentials in durable progress/job state.
+- Keep this as the first real daily brief slice. Do not add multiple sections, broad daily-brief templating, or agent/tool access in this step.
 
 ### Tests
 
 Add deterministic tests for:
 
-- configured Google Doc digest job reads through the source interface;
-- digest selects the next item/card through the durable progress layer;
-- digest rendering is bounded and deterministic;
-- notifier receives the expected compact message through a fake notifier;
-- source/notifier failures are recorded as failed job state with secret-safe errors and do not advance progress;
-- disabled digest jobs do not fetch Docs or send notifications;
-- no model calls are made.
+- configured `daily_brief` job reads the vocabulary source alias and parses one word per non-empty line;
+- selected word and deterministic countdown are included in the single LLM request;
+- notifier receives the LLM-returned fully formatted email body;
+- progress cursor advances after successful send and wraps after the last word;
+- source, LLM, and notifier failures are recorded as failed job state and do not advance progress;
+- persisted progress/job state does not contain full source text, generated email bodies, prompts, or credentials.
 
 ### Verification
 
 ```bash
 go test ./...
-agent-harness jobs run vocabulary-digest --instance default
+agent-harness jobs run daily-brief --instance default
 agent-harness jobs list --instance default
 agent-harness status --instance default --json
 ```
 
-Live verification should start with manual `jobs run` before enabling the digest on an unattended interval.
+Live verification should start with manual `jobs run` before enabling the daily brief on an unattended schedule.
 
 ---
 
