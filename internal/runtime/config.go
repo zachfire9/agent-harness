@@ -64,8 +64,8 @@ type JobConfig struct {
 	MaxChars    int
 	OutputPath  string
 	OutboxPath  string
-	Birthday    BirthdayBriefConfig
-	Vocabulary  VocabularyBriefConfig
+	Context     []NotificationContextConfig
+	Render      NotificationRenderConfig
 	Notifier    NotifierConfig
 	Google      GoogleConfig
 	Sources     SourceConfig
@@ -73,15 +73,31 @@ type JobConfig struct {
 	LLM         LLMConfig
 }
 
-type BirthdayBriefConfig struct {
-	Label string
-	Date  string
+type NotificationContextConfig struct {
+	ID           string
+	Type         string
+	Date         string
+	Label        string
+	OutputFormat string
+	Source       NotificationSourceConfig
+	Selection    NotificationSelectionConfig
 }
 
-type VocabularyBriefConfig struct {
-	Source      string
-	Parser      string
+type NotificationSourceConfig struct {
+	Type   string
+	Alias  string
+	Parser string
+}
+
+type NotificationSelectionConfig struct {
+	Strategy    string
 	ProgressKey string
+}
+
+type NotificationRenderConfig struct {
+	Type     string
+	Prompt   string
+	MaxChars int
 }
 
 type JobSchedule struct {
@@ -209,6 +225,7 @@ func (cfg LLMRegistryConfig) Resolve(selector LLMSelector) (LLMConfig, bool) {
 func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfig, LLMRegistryConfig, SourceConfig, bool, time.Duration, error) {
 	var jobs []JobConfig
 	var current *JobConfig
+	var currentContext *NotificationContextConfig
 	var google GoogleConfig
 	var notifier NotifierConfig
 	sources := SourceConfig{GoogleDocs: map[string]string{}}
@@ -218,6 +235,20 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 	var legacyInterval time.Duration
 	var section string
 
+	flushContext := func() {
+		if current != nil && currentContext != nil {
+			current.Context = append(current.Context, *currentContext)
+			currentContext = nil
+		}
+	}
+	flushJob := func() {
+		flushContext()
+		if current != nil {
+			jobs = append(jobs, *current)
+			current = nil
+		}
+	}
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		raw := scanner.Text()
@@ -225,7 +256,24 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if section == "jobs.context.source" && !strings.HasPrefix(raw, "          ") {
+			section = "jobs.context"
+		}
+		if section == "jobs.context.selection" && !strings.HasPrefix(raw, "          ") {
+			section = "jobs.context"
+		}
+		if section == "jobs.schedule" && !strings.HasPrefix(raw, "      ") {
+			section = "jobs"
+		}
+		if section == "jobs.render" && !strings.HasPrefix(raw, "      ") {
+			section = "jobs"
+		}
+		if section == "jobs.llm" && !strings.HasPrefix(raw, "      ") {
+			section = "jobs"
+		}
+
 		if line == "google:" {
+			flushContext()
 			section = "google"
 			continue
 		}
@@ -234,6 +282,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			continue
 		}
 		if line == "sources:" {
+			flushContext()
 			section = "sources"
 			continue
 		}
@@ -242,6 +291,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			continue
 		}
 		if line == "llms:" {
+			flushContext()
 			section = "llms"
 			continue
 		}
@@ -257,33 +307,8 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			section = "llms.providers.models"
 			continue
 		}
-		if section == "jobs.schedule" && !strings.HasPrefix(raw, "      ") {
-			section = "jobs"
-		}
-		if section == "jobs.birthday" && !strings.HasPrefix(raw, "      ") {
-			section = "jobs"
-		}
-		if section == "jobs.vocabulary" && !strings.HasPrefix(raw, "      ") {
-			section = "jobs"
-		}
-		if line == "llm:" && section == "jobs" && current != nil {
-			section = "jobs.llm"
-			continue
-		}
-		if line == "schedule:" && section == "jobs" && current != nil {
-			section = "jobs.schedule"
-			current.Interval = 0
-			continue
-		}
-		if line == "birthday:" && section == "jobs" && current != nil {
-			section = "jobs.birthday"
-			continue
-		}
-		if line == "vocabulary:" && section == "jobs" && current != nil {
-			section = "jobs.vocabulary"
-			continue
-		}
 		if line == "notifier:" {
+			flushContext()
 			section = "notifier"
 			continue
 		}
@@ -296,6 +321,36 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			sawJobs = true
 			continue
 		}
+		if line == "llm:" && strings.HasPrefix(section, "jobs") && current != nil {
+			flushContext()
+			section = "jobs.llm"
+			continue
+		}
+		if line == "schedule:" && strings.HasPrefix(section, "jobs") && current != nil {
+			flushContext()
+			section = "jobs.schedule"
+			current.Interval = 0
+			continue
+		}
+		if line == "context:" && strings.HasPrefix(section, "jobs") && current != nil {
+			flushContext()
+			section = "jobs.context"
+			continue
+		}
+		if line == "source:" && section == "jobs.context" && currentContext != nil {
+			section = "jobs.context.source"
+			continue
+		}
+		if line == "selection:" && section == "jobs.context" && currentContext != nil {
+			section = "jobs.context.selection"
+			continue
+		}
+		if line == "render:" && strings.HasPrefix(section, "jobs") && current != nil {
+			flushContext()
+			section = "jobs.render"
+			continue
+		}
+
 		if strings.HasPrefix(line, "- ") {
 			if section == "google.scopes" {
 				alias := strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "- ")), `"'`)
@@ -333,17 +388,24 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				}
 				continue
 			}
-			if section != "jobs" && section != "jobs.llm" && section != "jobs.schedule" && section != "jobs.birthday" && section != "jobs.vocabulary" {
-				continue
-			}
-			section = "jobs"
-			if current != nil {
-				jobs = append(jobs, *current)
-			}
-			current = &JobConfig{Enabled: true, Interval: defaultHeartbeatJobInterval}
-			line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
-			if line == "" {
-				continue
+			if section == "jobs.context" && strings.HasPrefix(raw, "      - ") {
+				flushContext()
+				currentContext = &NotificationContextConfig{}
+				line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				if line == "" {
+					continue
+				}
+			} else {
+				if section != "jobs" && section != "jobs.llm" && section != "jobs.schedule" && section != "jobs.context" && section != "jobs.render" {
+					continue
+				}
+				flushJob()
+				section = "jobs"
+				current = &JobConfig{Enabled: true, Interval: defaultHeartbeatJobInterval}
+				line = strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				if line == "" {
+					continue
+				}
 			}
 		}
 		key, value, ok := strings.Cut(line, ":")
@@ -417,23 +479,53 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 			}
 			continue
 		}
-		if section == "jobs.birthday" {
+		if section == "jobs.context" && currentContext != nil {
 			switch key {
-			case "label":
-				current.Birthday.Label = value
+			case "id":
+				currentContext.ID = value
+			case "type":
+				currentContext.Type = value
 			case "date":
-				current.Birthday.Date = value
+				currentContext.Date = value
+			case "label":
+				currentContext.Label = value
+			case "output_format":
+				currentContext.OutputFormat = value
 			}
 			continue
 		}
-		if section == "jobs.vocabulary" {
+		if section == "jobs.context.source" && currentContext != nil {
 			switch key {
-			case "source":
-				current.Vocabulary.Source = value
+			case "type":
+				currentContext.Source.Type = value
+			case "alias":
+				currentContext.Source.Alias = value
 			case "parser":
-				current.Vocabulary.Parser = value
+				currentContext.Source.Parser = value
+			}
+			continue
+		}
+		if section == "jobs.context.selection" && currentContext != nil {
+			switch key {
+			case "strategy":
+				currentContext.Selection.Strategy = value
 			case "progress_key":
-				current.Vocabulary.ProgressKey = value
+				currentContext.Selection.ProgressKey = value
+			}
+			continue
+		}
+		if section == "jobs.render" {
+			switch key {
+			case "type":
+				current.Render.Type = value
+			case "prompt":
+				current.Render.Prompt = value
+			case "max_chars":
+				maxChars, err := strconv.Atoi(value)
+				if err != nil {
+					return nil, google, notifier, llmRegistry, sources, true, 0, fmt.Errorf("invalid render max_chars for job %q: %q", current.Name, value)
+				}
+				current.Render.MaxChars = maxChars
 			}
 			continue
 		}
@@ -482,9 +574,7 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 	if currentLLMProvider != nil {
 		storeLLMProvider(&llmRegistry, *currentLLMProvider)
 	}
-	if current != nil {
-		jobs = append(jobs, *current)
-	}
+	flushJob()
 	return jobs, google, notifier, llmRegistry, sources, sawJobs, legacyInterval, nil
 }
 
@@ -556,7 +646,7 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 			return fmt.Errorf("duplicate job name %q", job.Name)
 		}
 		seen[job.Name] = true
-		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" && job.Type != "ai_email" && job.Type != "daily_brief" {
+		if job.Type != "heartbeat" && job.Type != "local_checkin" && job.Type != "notify_test" && job.Type != "ai_email" && job.Type != "scheduled_notification" {
 			return fmt.Errorf("unknown job type %q for job %q", job.Type, job.Name)
 		}
 		if err := validateJobSchedule(job); err != nil {
@@ -583,12 +673,12 @@ func validateRuntimeConfig(cfg RuntimeConfig) error {
 				return fmt.Errorf("ai_email job %q model %q is not listed for llm provider/profile %q", job.Name, job.ResolvedLLM().Model, job.ResolvedLLM().Profile)
 			}
 		}
-		if job.Type == "daily_brief" {
-			if err := validateDailyBriefJobConfig(job, cfg); err != nil {
+		if job.Type == "scheduled_notification" {
+			if err := validateScheduledNotificationJobConfig(job, cfg); err != nil {
 				return err
 			}
 			if provider, ok := cfg.LLMs.Providers[job.ResolvedLLM().Profile]; ok && !stringInSlice(job.ResolvedLLM().Model, provider.Models) {
-				return fmt.Errorf("daily_brief job %q model %q is not listed for llm provider/profile %q", job.Name, job.ResolvedLLM().Model, job.ResolvedLLM().Profile)
+				return fmt.Errorf("scheduled_notification job %q model %q is not listed for llm provider/profile %q", job.Name, job.ResolvedLLM().Model, job.ResolvedLLM().Profile)
 			}
 		}
 	}
@@ -705,43 +795,71 @@ func validateAIEmailJobConfig(job JobConfig) error {
 	return nil
 }
 
-func validateDailyBriefJobConfig(job JobConfig, cfg RuntimeConfig) error {
-	if strings.TrimSpace(job.Birthday.Label) == "" {
-		return fmt.Errorf("daily_brief job %q requires birthday label", job.Name)
+func validateScheduledNotificationJobConfig(job JobConfig, cfg RuntimeConfig) error {
+	if len(job.Context) == 0 {
+		return fmt.Errorf("scheduled_notification job %q requires at least one context item", job.Name)
 	}
-	if _, err := time.Parse("2006-01-02", job.Birthday.Date); err != nil {
-		return fmt.Errorf("daily_brief job %q requires birthday date in YYYY-MM-DD format", job.Name)
+	seenContext := map[string]bool{}
+	for _, item := range job.Context {
+		if strings.TrimSpace(item.ID) == "" {
+			return fmt.Errorf("scheduled_notification job %q has context item missing id", job.Name)
+		}
+		if seenContext[item.ID] {
+			return fmt.Errorf("scheduled_notification job %q has duplicate context id %q", job.Name, item.ID)
+		}
+		seenContext[item.ID] = true
+		switch item.Type {
+		case "days_until_date":
+			if _, err := time.Parse("2006-01-02", item.Date); err != nil {
+				return fmt.Errorf("scheduled_notification job %q context %q requires date in YYYY-MM-DD format", job.Name, item.ID)
+			}
+			if strings.TrimSpace(item.Label) == "" {
+				return fmt.Errorf("scheduled_notification job %q context %q requires label", job.Name, item.ID)
+			}
+		case "rotating_source_item":
+			if item.Source.Type != "google_doc" {
+				return fmt.Errorf("scheduled_notification job %q context %q unsupported source type %q", job.Name, item.ID, item.Source.Type)
+			}
+			if strings.TrimSpace(item.Source.Alias) == "" {
+				return fmt.Errorf("scheduled_notification job %q context %q requires source alias", job.Name, item.ID)
+			}
+			if strings.TrimSpace(cfg.Sources.GoogleDocs[item.Source.Alias]) == "" {
+				return fmt.Errorf("scheduled_notification job %q context %q references unknown source alias %q", job.Name, item.ID, item.Source.Alias)
+			}
+			if item.Source.Parser != ProgressParserNonEmptyLines {
+				return fmt.Errorf("scheduled_notification job %q context %q unsupported parser %q", job.Name, item.ID, item.Source.Parser)
+			}
+			if item.Selection.Strategy != "round_robin" {
+				return fmt.Errorf("scheduled_notification job %q context %q unsupported selection strategy %q", job.Name, item.ID, item.Selection.Strategy)
+			}
+			if strings.TrimSpace(item.Selection.ProgressKey) == "" {
+				return fmt.Errorf("scheduled_notification job %q context %q requires progress_key", job.Name, item.ID)
+			}
+		default:
+			return fmt.Errorf("scheduled_notification job %q has unknown context type %q", job.Name, item.Type)
+		}
 	}
-	if strings.TrimSpace(job.Vocabulary.Source) == "" {
-		return fmt.Errorf("daily_brief job %q requires vocabulary source", job.Name)
+	if job.Render.Type != "llm_template" {
+		return fmt.Errorf("scheduled_notification job %q requires render type llm_template", job.Name)
 	}
-	if strings.TrimSpace(cfg.Sources.GoogleDocs[job.Vocabulary.Source]) == "" {
-		return fmt.Errorf("daily_brief job %q references unknown vocabulary source %q", job.Name, job.Vocabulary.Source)
+	if strings.TrimSpace(job.Render.Prompt) == "" {
+		return fmt.Errorf("scheduled_notification job %q requires render prompt", job.Name)
 	}
-	if strings.TrimSpace(job.Vocabulary.Parser) == "" {
-		return fmt.Errorf("daily_brief job %q requires vocabulary parser", job.Name)
-	}
-	if job.Vocabulary.Parser != ProgressParserNonEmptyLines {
-		return fmt.Errorf("daily_brief job %q unsupported vocabulary parser %q", job.Name, job.Vocabulary.Parser)
-	}
-	if strings.TrimSpace(job.Vocabulary.ProgressKey) == "" {
-		return fmt.Errorf("daily_brief job %q requires vocabulary progress_key", job.Name)
-	}
-	if job.MaxChars <= 0 {
-		return fmt.Errorf("daily_brief job %q requires positive max_chars", job.Name)
+	if job.Render.MaxChars <= 0 {
+		return fmt.Errorf("scheduled_notification job %q requires positive render max_chars", job.Name)
 	}
 	llmConfig := job.ResolvedLLM()
 	if !job.LLMOverride.IsZero() && llmConfig.IsZero() {
-		return fmt.Errorf("daily_brief job %q references unknown llm provider/profile", job.Name)
+		return fmt.Errorf("scheduled_notification job %q references unknown llm provider/profile", job.Name)
 	}
 	if strings.TrimSpace(llmConfig.Provider) == "" {
-		return fmt.Errorf("daily_brief job %q requires llm provider", job.Name)
+		return fmt.Errorf("scheduled_notification job %q requires llm provider", job.Name)
 	}
 	if strings.TrimSpace(llmConfig.Model) == "" {
-		return fmt.Errorf("daily_brief job %q requires llm model", job.Name)
+		return fmt.Errorf("scheduled_notification job %q requires llm model", job.Name)
 	}
 	if strings.TrimSpace(llmConfig.APIKeyEnv) == "" {
-		return fmt.Errorf("daily_brief job %q requires llm api_key_env", job.Name)
+		return fmt.Errorf("scheduled_notification job %q requires llm api_key_env", job.Name)
 	}
 	return nil
 }

@@ -1375,67 +1375,80 @@ The CLI names are illustrative; keep this slice small and prefer tests over broa
 
 ---
 
-## Step 18 — First real daily brief job
+## Step 18 — Generic scheduled notification job
 
 - **Status:** Completed
 - **Branch:** `step-38-daily-brief-job`
 - **Pull Request:** https://github.com/zachfire9/agent-harness/pull/40
-- **Concept:** Use the source, progress, scheduler, LLM, and notifier pieces together for the first real daily brief email instead of a generic developer-only digest test.
+- **Concept:** Use the source, progress, scheduler, LLM, and notifier pieces together through generic config-driven notification primitives instead of hardcoding user-specific daily-brief sections in app code.
 
 ### Objective
 
-Add a `daily_brief` scheduled job that sends a bounded daily email containing a deterministic birthday countdown followed by a rotating vocabulary section from a configured Google Doc. The selected vocabulary word is passed to the configured LLM once, and the LLM returns the fully formatted email body.
+Add a `scheduled_notification` job that sends a bounded notification email by resolving named context values from config, rendering a prompt template with those values, making one LLM call for the final body, sending through the configured notifier, and advancing rotating-source progress only after successful delivery.
 
 ### Scope
 
-- Add a `daily_brief` job type, conceptually:
+- Add a reusable `scheduled_notification` job type, conceptually:
 
   ```yaml
   jobs:
-    - name: daily-brief
-      type: daily_brief
+    - name: morning-note
+      type: scheduled_notification
       enabled: true
       schedule:
         daily_at: "08:00"
         timezone: "America/New_York"
-      birthday:
-        label: "Zach's 80th birthday"
-        date: "2063-10-28"
-      vocabulary:
-        source: vocabulary_doc_id
-        parser: non_empty_lines
-        progress_key: vocabulary-daily-brief
-      max_chars: 1200
+      context:
+        - id: countdown
+          type: days_until_date
+          date: "2063-10-28"
+          label: "Zach's 80th birthday"
+          output_format: "{days} days until {label}"
+        - id: word
+          type: rotating_source_item
+          source:
+            type: google_doc
+            alias: vocabulary_doc_id
+            parser: non_empty_lines
+          selection:
+            strategy: round_robin
+            progress_key: vocabulary-daily-brief
+      render:
+        type: llm_template
+        prompt: "Write the complete email body. Countdown first: {{ countdown }}. Then word: {{ word }}. Include a concise definition and example sentence. Return only the body."
+        max_chars: 1200
   ```
 
-- Keep the birthday countdown deterministic in code; do not ask the LLM to compute dates.
-- Select exactly one vocabulary word from the configured Google Doc using the durable round-robin progress layer.
-- Make one LLM call with the selected word and countdown context; the LLM should produce the complete email body with the birthday countdown first and the vocabulary section second.
-- Send via the configured notifier and advance the progress cursor only after the notifier reports success.
+- Keep reusable deterministic context producers in code:
+  - `days_until_date`
+  - `rotating_source_item`
+- Keep labels such as daily brief, birthday, vocabulary, section names, and wording in instance config only.
+- Make one LLM call with the rendered prompt; the LLM should produce the complete message body.
+- Send via the configured notifier and advance rotating-source progress only after the notifier reports success.
 - Record normal job metadata in `state/jobs.json` and progress metadata in `state/progress/`, but do not store full document content, prompts, generated message bodies, or credentials in durable progress/job state.
-- Keep this as the first real daily brief slice. Do not add multiple sections, broad daily-brief templating, or agent/tool access in this step.
+- Do not add broad daily-brief section abstractions, agent/tool access, or multiple renderer types in this step.
 
 ### Tests
 
 Add deterministic tests for:
 
-- configured `daily_brief` job reads the vocabulary source alias and parses one word per non-empty line;
-- selected word and deterministic countdown are included in the single LLM request;
-- notifier receives the LLM-returned fully formatted email body;
-- progress cursor advances after successful send and wraps after the last word;
+- configured `scheduled_notification` jobs parse generic context producers and renderer config;
+- `days_until_date` and `rotating_source_item` values are rendered into a single LLM request;
+- notifier receives the LLM-returned fully formatted body;
+- progress cursor advances after successful send and wraps after the last item;
 - source, LLM, and notifier failures are recorded as failed job state and do not advance progress;
-- persisted progress/job state does not contain full source text, generated email bodies, prompts, or credentials.
+- persisted progress/job state does not contain full source text, generated message bodies, prompts, or credentials.
 
 ### Verification
 
 ```bash
 go test ./...
-agent-harness jobs run daily-brief --instance default
+agent-harness jobs run morning-note --instance default
 agent-harness jobs list --instance default
 agent-harness status --instance default --json
 ```
 
-Live verification should start with manual `jobs run` before enabling the daily brief on an unattended schedule.
+Live verification should start with manual `jobs run` before enabling the notification on an unattended schedule.
 
 ---
 

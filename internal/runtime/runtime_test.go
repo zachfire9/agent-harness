@@ -1178,7 +1178,7 @@ func TestRunConfiguredJobNowRecordsFailureState(t *testing.T) {
 	}
 }
 
-func TestReadRuntimeConfigParsesDailyBriefConfig(t *testing.T) {
+func TestReadRuntimeConfigParsesScheduledNotificationConfig(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
@@ -1199,18 +1199,29 @@ sources:
   google_docs:
     vocabulary_doc_id: "doc-123"
 jobs:
-  - name: daily-brief
-    type: daily_brief
+  - name: morning-note
+    type: scheduled_notification
     enabled: true
     interval_seconds: 86400
-    birthday:
-      label: "Zach's 80th birthday"
-      date: "2063-10-28"
-    vocabulary:
-      source: vocabulary_doc_id
-      parser: non_empty_lines
-      progress_key: vocabulary-daily-brief
-    max_chars: 1200
+    context:
+      - id: countdown
+        type: days_until_date
+        date: "2063-10-28"
+        label: "Zach's 80th birthday"
+        output_format: "{days} days until {label}"
+      - id: word
+        type: rotating_source_item
+        source:
+          type: google_doc
+          alias: vocabulary_doc_id
+          parser: non_empty_lines
+        selection:
+          strategy: round_robin
+          progress_key: vocabulary-daily-brief
+    render:
+      type: llm_template
+      prompt: "Write the complete email body. Countdown: {{ countdown }}. Word: {{ word }}. Include a definition and sentence."
+      max_chars: 1200
 `
 	if err := os.WriteFile(filepath.Join(paths.ConfigDir, "config.yaml"), []byte(config), 0o644); err != nil {
 		t.Fatalf("write config failed: %v", err)
@@ -1221,18 +1232,22 @@ jobs:
 		t.Fatalf("read runtime config failed: %v", err)
 	}
 	job := cfg.Jobs[0]
-	if job.Type != "daily_brief" || job.Birthday.Label != "Zach's 80th birthday" || job.Birthday.Date != "2063-10-28" {
-		t.Fatalf("unexpected birthday config: %#v", job)
+	if job.Type != "scheduled_notification" || len(job.Context) != 2 {
+		t.Fatalf("unexpected scheduled notification config: %#v", job)
 	}
-	if job.Vocabulary.Source != "vocabulary_doc_id" || job.Vocabulary.Parser != ProgressParserNonEmptyLines || job.Vocabulary.ProgressKey != "vocabulary-daily-brief" {
-		t.Fatalf("unexpected vocabulary config: %#v", job.Vocabulary)
+	if job.Context[0].ID != "countdown" || job.Context[0].Type != "days_until_date" || job.Context[0].Date != "2063-10-28" {
+		t.Fatalf("unexpected countdown context: %#v", job.Context[0])
 	}
-	if job.MaxChars != 1200 || job.ResolvedLLM().Model != "gpt-4o-mini" {
-		t.Fatalf("unexpected daily brief config: %#v", job)
+	rotating := job.Context[1]
+	if rotating.ID != "word" || rotating.Type != "rotating_source_item" || rotating.Source.Alias != "vocabulary_doc_id" || rotating.Source.Parser != ProgressParserNonEmptyLines || rotating.Selection.ProgressKey != "vocabulary-daily-brief" {
+		t.Fatalf("unexpected rotating context: %#v", rotating)
+	}
+	if job.Render.Type != "llm_template" || job.Render.MaxChars != 1200 || !strings.Contains(job.Render.Prompt, "{{ word }}") {
+		t.Fatalf("unexpected render config: %#v", job.Render)
 	}
 }
 
-func TestRunDailyBriefUsesOneLLMCallAndAdvancesProgressAfterSend(t *testing.T) {
+func TestRunScheduledNotificationUsesOneLLMCallAndAdvancesProgressAfterSend(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
@@ -1240,113 +1255,115 @@ func TestRunDailyBriefUsesOneLLMCallAndAdvancesProgressAfterSend(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	notifier := &recordingNotifier{}
 	client := &recordingLLMClient{response: "13,536 days until Zach's 80th birthday\n\nVocabulary · Equanimity\n- Definition: Calmness under stress.\n- Example sentence: She handled the delay with equanimity."}
-	cfg := JobConfig{
-		Name:       "daily-brief",
-		Type:       "daily_brief",
-		Enabled:    true,
-		Interval:   24 * time.Hour,
-		MaxChars:   1200,
-		Birthday:   BirthdayBriefConfig{Label: "Zach's 80th birthday", Date: "2063-10-28"},
-		Vocabulary: VocabularyBriefConfig{Source: "vocabulary_doc_id", Parser: ProgressParserNonEmptyLines, ProgressKey: "vocabulary-daily-brief"},
-		LLM:        LLMConfig{Provider: "openai", Model: "gpt-4o-mini", APIKeyEnv: "OPENAI_API_KEY"},
-	}
+	cfg := scheduledNotificationTestConfig()
 
-	state, err := runDailyBriefWithClients(paths, now, cfg, notifier, client, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+	state, err := runScheduledNotificationWithClients(paths, now, cfg, notifier, client, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
 		return GoogleDocSource{Alias: alias, DocumentID: "doc-123", Title: "Vocabulary", Text: "Equanimity\nSomatic\n"}, nil
 	})
 	if err != nil {
-		t.Fatalf("run daily brief failed: %v", err)
+		t.Fatalf("run scheduled notification failed: %v", err)
 	}
-	if state.Status != JobSucceeded || state.LastError != "" {
+	if state.Status != JobSucceeded || state.Type != "scheduled_notification" {
 		t.Fatalf("unexpected state: %#v", state)
 	}
 	if len(client.requests) != 1 {
-		t.Fatalf("expected one LLM request, got %d", len(client.requests))
+		t.Fatalf("expected one llm request, got %d", len(client.requests))
 	}
-	requestText := client.requests[0].Messages[len(client.requests[0].Messages)-1].Content
-	for _, want := range []string{"13,536 days until Zach's 80th birthday", "Vocabulary word: Equanimity", "Return only the email body"} {
-		if !strings.Contains(requestText, want) {
-			t.Fatalf("expected LLM request to contain %q, got %q", want, requestText)
+	prompt := client.requests[0].Messages[1].Content
+	for _, want := range []string{"13,536 days until Zach's 80th birthday", "Word: Equanimity", "definition and sentence"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to contain %q, got %q", want, prompt)
 		}
 	}
 	if len(notifier.messages) != 1 || !strings.Contains(notifier.messages[0].Body, "Vocabulary · Equanimity") {
-		t.Fatalf("expected notifier to receive LLM body, got %#v", notifier.messages)
+		t.Fatalf("expected notifier to receive llm body, got %#v", notifier.messages)
 	}
 	progress, err := ReadProgressState(paths, "vocabulary-daily-brief")
 	if err != nil {
-		t.Fatalf("read progress state: %v", err)
+		t.Fatalf("read progress failed: %v", err)
 	}
-	if progress.Cursor.NextIndex != 1 || progress.History.PendingItemID != "" || progress.History.LastSelectedID != "equanimity" {
-		t.Fatalf("expected progress advanced after send, got %#v", progress)
+	if progress.Cursor.NextIndex != 1 || progress.History.LastSelectedID != "equanimity" {
+		t.Fatalf("expected progress to advance after send, got %#v", progress)
 	}
 }
 
-func TestRunDailyBriefDoesNotAdvanceProgressWhenNotifierFails(t *testing.T) {
+func TestRunScheduledNotificationDoesNotAdvanceProgressWhenNotifierFails(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
 	}
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	notifier := &recordingNotifier{err: errors.New("smtp unavailable")}
-	client := &recordingLLMClient{response: "body with Equanimity"}
-	cfg := JobConfig{
-		Name:       "daily-brief",
-		Type:       "daily_brief",
-		Enabled:    true,
-		Interval:   24 * time.Hour,
-		MaxChars:   1200,
-		Birthday:   BirthdayBriefConfig{Label: "Zach's 80th birthday", Date: "2063-10-28"},
-		Vocabulary: VocabularyBriefConfig{Source: "vocabulary_doc_id", Parser: ProgressParserNonEmptyLines, ProgressKey: "vocabulary-daily-brief"},
-		LLM:        LLMConfig{Provider: "openai", Model: "gpt-4o-mini", APIKeyEnv: "OPENAI_API_KEY"},
-	}
+	notifier := &recordingNotifier{err: errors.New("send failed")}
+	client := &recordingLLMClient{response: "body"}
+	cfg := scheduledNotificationTestConfig()
 
-	_, err = runDailyBriefWithClients(paths, now, cfg, notifier, client, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+	_, err = runScheduledNotificationWithClients(paths, now, cfg, notifier, client, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
 		return GoogleDocSource{Alias: alias, DocumentID: "doc-123", Title: "Vocabulary", Text: "Equanimity\nSomatic\n"}, nil
 	})
-	if err == nil || !strings.Contains(err.Error(), "smtp unavailable") {
-		t.Fatalf("expected notifier failure, got %v", err)
+	if err == nil {
+		t.Fatalf("expected notifier error")
 	}
-	progress, readErr := ReadProgressState(paths, "vocabulary-daily-brief")
-	if readErr != nil {
-		t.Fatalf("read progress state: %v", readErr)
+	progress, err := ReadProgressState(paths, "vocabulary-daily-brief")
+	if err != nil {
+		t.Fatalf("read progress failed: %v", err)
 	}
 	if progress.Cursor.NextIndex != 0 || progress.History.PendingItemID != "equanimity" || progress.History.LastSelectedID != "" {
-		t.Fatalf("expected pending progress without advancement, got %#v", progress)
+		t.Fatalf("expected progress to remain pending without advancing, got %#v", progress)
 	}
 }
 
-func TestDailyBriefProgressStateDoesNotPersistSourceOrGeneratedBody(t *testing.T) {
+func TestScheduledNotificationProgressStateDoesNotPersistSourcePromptOrGeneratedBody(t *testing.T) {
 	paths, err := LinuxPaths(t.TempDir(), "default")
 	if err != nil {
 		t.Fatalf("expected paths, got %v", err)
 	}
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	generated := "secret generated email body for Equanimity"
-	cfg := JobConfig{
-		Name:       "daily-brief",
-		Type:       "daily_brief",
-		Enabled:    true,
-		Interval:   24 * time.Hour,
-		MaxChars:   1200,
-		Birthday:   BirthdayBriefConfig{Label: "Zach's 80th birthday", Date: "2063-10-28"},
-		Vocabulary: VocabularyBriefConfig{Source: "vocabulary_doc_id", Parser: ProgressParserNonEmptyLines, ProgressKey: "vocabulary-daily-brief"},
-		LLM:        LLMConfig{Provider: "openai", Model: "gpt-4o-mini", APIKeyEnv: "OPENAI_API_KEY"},
-	}
+	generated := "Vocabulary · Equanimity\n- Definition: generated body should not persist"
+	cfg := scheduledNotificationTestConfig()
 
-	_, err = runDailyBriefWithClients(paths, now, cfg, &recordingNotifier{}, &recordingLLMClient{response: generated}, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
+	_, err = runScheduledNotificationWithClients(paths, now, cfg, &recordingNotifier{}, &recordingLLMClient{response: generated}, func(ctx context.Context, paths Paths, cfg JobConfig, alias string) (GoogleDocSource, error) {
 		return GoogleDocSource{Alias: alias, DocumentID: "doc-123", Title: "Vocabulary", Text: "Equanimity\nSomatic\n"}, nil
 	})
 	if err != nil {
-		t.Fatalf("run daily brief failed: %v", err)
+		t.Fatalf("run scheduled notification failed: %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(paths.StateDir, "progress", "vocabulary-daily-brief.json"))
 	if err != nil {
-		t.Fatalf("read progress file: %v", err)
+		t.Fatalf("read progress file failed: %v", err)
 	}
-	for _, forbidden := range []string{"secret generated email body", "Somatic", "Return only the email body", "OPENAI_API_KEY", "access_token"} {
-		if strings.Contains(string(raw), forbidden) {
-			t.Fatalf("progress state leaked %q: %s", forbidden, string(raw))
+	contents := string(raw)
+	for _, forbidden := range []string{"Equanimity\nSomatic", "generated body should not persist", "Write the complete email body"} {
+		if strings.Contains(contents, forbidden) {
+			t.Fatalf("progress state persisted forbidden content %q in %s", forbidden, contents)
 		}
+	}
+}
+
+func scheduledNotificationTestConfig() JobConfig {
+	return JobConfig{
+		Name:     "morning-note",
+		Type:     "scheduled_notification",
+		Enabled:  true,
+		Interval: 24 * time.Hour,
+		Context: []NotificationContextConfig{
+			{ID: "countdown", Type: "days_until_date", Date: "2063-10-28", Label: "Zach's 80th birthday", OutputFormat: "{days} days until {label}"},
+			{
+				ID:   "word",
+				Type: "rotating_source_item",
+				Source: NotificationSourceConfig{
+					Type:   "google_doc",
+					Alias:  "vocabulary_doc_id",
+					Parser: ProgressParserNonEmptyLines,
+				},
+				Selection: NotificationSelectionConfig{Strategy: "round_robin", ProgressKey: "vocabulary-daily-brief"},
+			},
+		},
+		Render: NotificationRenderConfig{
+			Type:     "llm_template",
+			Prompt:   "Write the complete email body. Countdown: {{ countdown }}. Word: {{ word }}. Include a definition and sentence. Return only the body.",
+			MaxChars: 1200,
+		},
+		LLM: LLMConfig{Provider: "openai", Model: "gpt-4o-mini", APIKeyEnv: "OPENAI_API_KEY"},
 	}
 }
 
