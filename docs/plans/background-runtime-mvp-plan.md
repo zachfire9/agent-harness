@@ -1593,9 +1593,9 @@ The adapter runs only while its user is logged in: no boot/before-login or after
 
 ## Step 22 — Guided Windows onboarding and first conversation
 
-- **Status:** Implementation present in working tree; Linux tests/vet and Windows crosscompilation verified locally. Native Windows onboarding execution/CI and publication remain pending; not release-verified.
+- **Status:** Completed; implementation and native Windows CI verified. Not yet merged, released, or installed.
 - **Branch:** `step-22-windows-onboarding`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/44
 - **Concept:** Replace repeated PowerShell setup blocks with a first-run wizard and a repeatable chat entry point. Download/extract the Windows ZIP, run `agent-harness.exe setup`, answer a few prompts, then use `agent-harness chat` or a shortcut on later visits.
 
 ### Objective and user flow
@@ -1611,7 +1611,7 @@ The adapter runs only while its user is logged in: no boot/before-login or after
 
 ### Implementation checklist / acceptance criteria
 
-Implementation inventory (checked items below indicate implemented code/docs, not native acceptance): `internal/onboarding` supplies the wizard, non-secret settings, Credential Manager and optional owned integrations; the CLI resolver supplies saved/current/absolute workspace selection and environment > workspace `.env` > saved > built-in precedence. Removal preserves workspace files and copied binaries. Optional integration writes are not transactional; failure after Apply may leave settings saved and is documented for retry/removal. No live install, real credentials, background jobs, commits, tags, or publication were performed.
+Implementation inventory (checked items below indicate implemented code/docs, not native acceptance): `internal/onboarding` supplies the wizard, non-secret settings, Credential Manager and optional owned integrations; the CLI resolver supplies saved/current/absolute workspace selection and environment > workspace `.env` > saved > built-in precedence. Removal preserves workspace files and copied binaries. Optional integration writes are not transactional; failure after Apply may leave settings saved and is documented for retry/removal. No live install, real credentials, production background-job changes, tags, or publication were performed.
 
 - [x] Add a testable interactive `setup` command with clear defaults, hidden secret input, cancellation/EOF handling, and helpful retry/error messages. Non-interactive invocations must fail clearly rather than hang.
 - [x] Persist provider/model selectors, workspace, and onboarding preferences separately from secrets; use Windows Credential Manager for the saved API key and persist only its reference. Allow replacement/removal and explain provider-side revocation separately. Do not print secrets or pass them in process arguments, shortcuts, logs, or diagnostic output.
@@ -1625,14 +1625,14 @@ Implementation inventory (checked items below indicate implemented code/docs, no
 
 ### Tests and verification
 
-Local evidence: `gofmt`; `go test ./... -count=1`; `go test -race ./... -count=1`; `go vet ./...`; `GOOS=windows GOARCH=amd64 go test -exec=true ./...` (compile only, NOT native execution); Windows-target `go vet`; `git diff --check`. Completion pass observed behavioral RED then GREEN for preserving rerun logging and hidden-prompt cancellation, and source-contract RED/GREEN for packaging/CI. Other pre-existing feature tests are regression coverage here, not a claim of freshly observed RED. `scripts/test-windows-onboarding.ps1` drives the extracted binary through the opt-in ConPTY test with a unique fake credential, loopback provider, Unicode/spaced temporary workspace and owned shortcut, fresh-process config/chat, rerun, and removal; cleanup runs even on failure. CI adds this gate before the existing strict runtime/task gate; release still depends on the reusable verification workflow. Native PowerShell/ConPTY/Credential Manager/shortcut execution has NOT run on this Linux host.
+Local evidence: `gofmt`; `go test ./... -count=1`; `go test -race ./... -count=1`; `go vet ./...`; `GOOS=windows GOARCH=amd64 go test -exec=true ./...` (compile only, NOT native execution); Windows-target `go vet`; `git diff --check`. Completion pass observed behavioral RED then GREEN for preserving rerun logging and hidden-prompt cancellation, and source-contract RED/GREEN for packaging/CI. Other pre-existing feature tests are regression coverage here, not a claim of freshly observed RED. `scripts/test-windows-onboarding.ps1` drives the extracted binary through the opt-in ConPTY test with a unique fake credential, loopback provider, Unicode/spaced temporary workspace and owned shortcut, fresh-process config/chat, rerun, and removal; cleanup runs even on failure. CI adds this gate before the existing strict runtime/task gate; release still depends on the reusable verification workflow. Native Windows execution passed in [CI run 39298133159](https://github.com/zachfire9/agent-harness/actions/runs/39298133159) on implementation commit `94def52`, including extracted-binary onboarding and the strict Task Scheduler lifecycle. These were executed on the Windows runner, not this Linux host.
 Packaging evidence: an isolated source copy ran `scripts/build-release.sh step22-verification`; Linux amd64/arm64 and Windows amd64 artifacts built, all three checksum entries verified, Windows ZIP contents included `FIRST-CONVERSATION.md`, and the extracted Linux binary reported the injected version. Original checkout `dist/` files were left unchanged. The native smoke intentionally does not change user PATH; PATH behavior uses deterministic fake-runner tests. Real provider calls remain optional manual consent only.
 
-- [ ] Use RED/GREEN tests for wizard input/defaults/cancel/non-TTY behavior, saved-config round trips and precedence, fake credential-store success/failure/removal, secret-safe diagnostics, and idempotent setup with paths containing spaces/non-ASCII characters.
-- [ ] Test workspace selection and shortcut/user-PATH generation, including conflicts and cleanup, without altering real developer settings. No test may register background jobs or use real API keys by default.
-- [ ] Run native Windows isolated smoke: extracted binary setup with synthetic input -> fresh-process config check -> chat startup/exit -> rerun setup -> removal. Exercise a uniquely named fake Credential Manager entry and temporary shortcut/workspace, cleaning up in `finally`; never access existing user credentials.
-- [ ] Test optional connection validation through a fake local model endpoint, including auth/network/model errors. Real billable requests remain explicitly consented manual checks, not CI prerequisites.
-- [ ] Run full tests/vet and Linux regression checks, inspect packaged documentation/links, and keep native Windows CI/release verification gates passing.
+- [x] Use RED/GREEN tests for wizard input/defaults/cancel/non-TTY behavior, saved-config round trips and precedence, fake credential-store success/failure/removal, secret-safe diagnostics, and idempotent setup with paths containing spaces/non-ASCII characters.
+- [x] Test workspace selection and shortcut/user-PATH generation, including conflicts and cleanup, without altering real developer settings. No test may register background jobs or use real API keys by default.
+- [x] Run native Windows isolated smoke: extracted binary setup with synthetic input -> fresh-process config check -> chat startup/exit -> rerun setup -> removal. Exercise a uniquely named fake Credential Manager entry and temporary shortcut/workspace, cleaning up in `finally`; never access existing user credentials.
+- [x] Test optional connection validation through a fake local model endpoint, including auth/network/model errors. Real billable requests remain explicitly consented manual checks, not CI prerequisites.
+- [x] Run full tests/vet and Linux regression checks, inspect packaged documentation/links, and keep native Windows CI/release verification gates passing.
 
 ### Scope boundaries
 

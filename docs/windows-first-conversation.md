@@ -4,7 +4,7 @@
 
 Use a normal **non-administrator PowerShell 5.1 or 7** window on Windows amd64. You need internet access and an OpenAI-compatible API account with billing enabled. No Go, Git, source checkout, `init`, daemon, Task Scheduler, or installer is needed to chat.
 
-**Availability:** this guide requires the first release containing **Step 22 (`setup`) or later**. No numbered supporting release is claimed yet; v0.1.5 does not contain it, and a Step-21-only Windows binary is insufficient. Implementation and Linux checks are available in the Step 22 branch; native Windows onboarding verification and publication are still pending. Stop if the release does not explicitly include Step 22.
+**Availability:** this guide requires the first release containing **Step 22 (`setup`) or later**. No numbered supporting release is claimed yet; v0.1.5 does not contain it, and a Step-21-only Windows binary is insufficient. Implementation, Linux checks, and [native Windows onboarding verification](https://github.com/zachfire9/agent-harness/actions/runs/39298133159) passed on the Step 22 branch; publication is still pending. Stop if the release does not explicitly include Step 22.
 
 ## 1. Download, verify, and extract
 
