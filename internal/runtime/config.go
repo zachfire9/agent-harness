@@ -936,6 +936,16 @@ func validateInstanceRelativePath(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
+	// Use a portable config path grammar: Windows drive-relative paths, UNC,
+	// alternate data streams, device names, and aliases must never escape checks.
+	if strings.ContainsAny(path, "\\:\x00\r\n") || strings.HasPrefix(path, "/") {
+		return fmt.Errorf("must be a portable relative path")
+	}
+	for _, component := range strings.Split(path, "/") {
+		if windowsReservedName(component) || strings.HasSuffix(component, ".") && component != ".." && component != "." || strings.HasSuffix(component, " ") {
+			return fmt.Errorf("invalid path component")
+		}
+	}
 	if filepath.IsAbs(path) {
 		return fmt.Errorf("must be relative")
 	}

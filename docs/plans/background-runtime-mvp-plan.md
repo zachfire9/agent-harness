@@ -1520,7 +1520,7 @@ This step should keep the app-level capability generic:
   - `text/plain` fallback;
   - `text/html` rich body.
 
-- Implement app-controlled conversion from textual content to escaped HTML: headings (`# ` through `### `), paragraphs/line breaks, and flat `- ` / `* ` bullets only. No inline formatting, raw HTML, links, images, scripts, or source-controlled attributes. Indentation is ignored; unrecognized syntax stays literal. The renderer is non-recursive and linear; it adds no dependency or model call. See the [precise format contract](../background-runtime.md#gmail-body-formats-step-20-unreleased).
+- Implement app-controlled conversion from textual content to escaped HTML: headings (`# ` through `### `), paragraphs/line breaks, and flat `- ` / `* ` bullets only. No inline formatting, raw HTML, links, images, scripts, or source-controlled attributes. Indentation is ignored; unrecognized syntax stays literal. The renderer is non-recursive and linear; it adds no dependency or model call. See the [precise format contract](../background-runtime.md#gmail-body-formats-step-20-v015).
 
 - Extend config without breaking the legacy plain-text body/layout:
 
@@ -1560,68 +1560,95 @@ go test ./internal/runtime -run 'TestGmail' -count=1
 
 Verification is isolated: temporary instance directories, fake model/token, and a loopback HTTP Gmail endpoint. The delivery smoke test decodes actual MIME, verifies Unicode and escaped hostile HTML, exercises HTTP failure followed by success, checks one model call per run and advance-only-after-success, and checks persisted job/progress state for content/credential leaks. Existing Step 19 date tests remain in the full suite. No external email, live instance/config/service changes, or live progress consumption is part of this step.
 
-**Availability:** v0.1.4 supports Step 19. Multipart is implemented on this Step 20 branch and is not released yet. Keep the installed runtime on a released version while the branch is open. Merge, publish, and release/install are separate post-merge actions; do not install a local dev build for verification. Any later real Gmail visual check requires separate approval, explicit recipients, and an isolated instance with independent progress keys.
+**Availability:** v0.1.4 supports Step 19; **v0.1.5** includes Step 20 multipart Gmail bodies. Merge, publish, and release/install are separate actions; do not install a local dev build for verification. Any later real Gmail visual check requires separate approval, explicit recipients, and an isolated instance with independent progress keys.
 
 ---
 
-## Future TODO — macOS and Windows runtime adapters
+## Step 21 — Windows current-user background runtime
 
-- **Status:** Future
+- **Status:** Completed (implementation and native verification; merge/release/install pending)
+- **Branch:** `step-21-windows-runtime`
+- **Pull Request:** [#43](https://github.com/zachfire9/agent-harness/pull/43)
+- **Concept:** Add a limited current-user at-login Task Scheduler adapter, without administrator access or a saved password. Reuse shared daemon/jobs/status; leave Linux/systemd unchanged.
+
+### Implementation checklist
+
+- [x] LOCALAPPDATA instance defaults and explicit `--home` support.
+- [x] Generate-only PowerShell task registration with absolute binary/home paths, current SID, Interactive token, Limited privileges, IgnoreNew, restart/battery policy, and no execution time limit.
+- [x] Private Windows env-file ACL validation and literal `*_API_KEY` parser; private/broad fake ACL fixtures.
+- [x] Portable path validation, Windows IANA timezone embedding, OS dispatch and status hint tests.
+- [x] Windows amd64 ZIP plus checksums and install/runtime documentation.
+- [x] Native CLI/ACL/task smoke script and Ubuntu/Windows reusable CI gate before release publication.
+- [x] Execute native Windows unit/vet and CLI/ACL smoke; [CI evidence](https://github.com/zachfire9/agent-harness/actions/runs/39276862161).
+- [x] Execute full native register/query/start/fresh heartbeat/stop/unregister lifecycle in an interactive session; the same CI run records all lifecycle PASS markers and cleanup. Session-0/token-unavailable output remains failure, not E2E success.
+- [x] Open implementation PR after review; merge/release/install require separate approval.
+
+### Verification and limits
+
+Run `go test ./...`, `go vet ./...`, `git diff --check`, Windows crosscompilation, and the actual release builder/checksum/archive inspection locally. Run `scripts/test-windows-runtime.ps1` on native Windows. Local Linux/crosscompile evidence cannot satisfy unchecked native items. See [Windows runtime](../windows-runtime.md) for install, private ACL provisioning before credentials, lifecycle, forcibly stopped/stale snapshots, and cleanup.
+
+The adapter runs only while its user is logged in: no boot/before-login or after-logout promise, no Windows Service, no elevated task, no automatic output capture. Hosted runners without an Interactive token fail the strict lifecycle gate; use an approved interactive runner rather than masking that failure. No live task registration, install, credential use, merge, or publishing is part of local development verification.
+
+---
+
+## Step 22 — Guided Windows onboarding and first conversation
+
+- **Status:** Pending; planning only, implementation is a separate post-Step-21 PR
+- **Branch:** TBD (planned: `step-22-windows-onboarding`)
+- **Pull Request:** TBD
+- **Concept:** Replace repeated PowerShell setup blocks with a first-run wizard and a repeatable chat entry point. Download/extract the Windows ZIP, run `agent-harness.exe setup`, answer a few prompts, then use `agent-harness chat` or a shortcut on later visits.
+
+### Objective and user flow
+
+1. Download/extract a verified Windows release; no Go, Git, source checkout, administrator privileges, or MSI installer required.
+2. Run `agent-harness.exe setup` from the extracted folder.
+3. Select an OpenAI-compatible provider endpoint and model with sensible defaults; show API billing and external-data-transmission notices.
+4. Enter the API key using hidden input. Offer Windows Credential Manager storage for reuse and a clearly labeled session-only alternative; never silently fall back to plaintext storage.
+5. Choose/create a workspace and remember it. Show exactly which folder tools will access; do not default to exposing the entire user profile.
+6. Review the proposed changes, then save non-secret settings in a consistent per-user location. Offer a stable per-user executable location if launched from a temporary extraction folder; confirm before copying or replacing anything.
+7. Optionally test the connection, with explicit consent that it sends a request and may incur API charges. Offline local validation must be distinct from provider/key/model validation.
+8. Offer to start chatting. On a later launch, `agent-harness chat` or an optional **Chat with Agent Harness** shortcut restores saved settings and the selected workspace without repasting environment blocks. This does not imply resuming conversation history.
+
+### Implementation checklist / acceptance criteria
+
+- [ ] Add a testable interactive `setup` command with clear defaults, hidden secret input, cancellation/EOF handling, and helpful retry/error messages. Non-interactive invocations must fail clearly rather than hang.
+- [ ] Persist provider/model selectors, workspace, and onboarding preferences separately from secrets; use Windows Credential Manager for the saved API key and persist only its reference. Allow replacement/removal and explain provider-side revocation separately. Do not print secrets or pass them in process arguments, shortcuts, logs, or diagnostic output.
+- [ ] Wire `chat`, `ask`, and `config check` to the saved configuration/credential resolver. Define and document deterministic precedence with existing process environment and workspace `.env` overrides, preserving existing explicit configuration behavior. Keep background instance YAML/private-env handling separate; do not silently reconfigure daemon jobs.
+- [ ] Make selected-workspace behavior explicit: allow intentionally using a different current project directory without a silent directory switch; ensure shortcut working directory and any workspace-selection mechanism agree with file-tool sandboxing. Retain existing tool restrictions and explain that model-supplied `confirm:true` is not human approval.
+- [ ] Offer opt-in user PATH integration and a terminal chat shortcut; never modify machine PATH or require elevation. Use stable absolute executable paths, quote paths safely, and keep secrets out of shortcut arguments. Skip existing PATH entries and review conflicts rather than replacing another installation.
+- [ ] Make setup rerunnable without losing settings or overwriting credentials/workspaces unexpectedly. Document rollback/removal for settings, credential entries, optional shortcut, and user PATH entry; do not delete user workspace files.
+- [ ] Keep first-run logging off unless the user opts in; distinguish in-memory chat history from diagnostic logs and persistent settings.
+- [ ] Replace the beginner walkthrough's large setup blocks with the actual wizard flow once available, retaining manual setup as an advanced fallback. Link from README and packaged Windows instructions, and state the minimum supporting release.
+- [ ] Preserve Linux CLI behavior and the shared agent/tool loop. Keep platform-specific credential, path, and shortcut integration behind small testable boundaries.
+
+### Tests and verification
+
+- [ ] Use RED/GREEN tests for wizard input/defaults/cancel/non-TTY behavior, saved-config round trips and precedence, fake credential-store success/failure/removal, secret-safe diagnostics, and idempotent setup with paths containing spaces/non-ASCII characters.
+- [ ] Test workspace selection and shortcut/user-PATH generation, including conflicts and cleanup, without altering real developer settings. No test may register background jobs or use real API keys by default.
+- [ ] Run native Windows isolated smoke: extracted binary setup with synthetic input -> fresh-process config check -> chat startup/exit -> rerun setup -> removal. Exercise a uniquely named fake Credential Manager entry and temporary shortcut/workspace, cleaning up in `finally`; never access existing user credentials.
+- [ ] Test optional connection validation through a fake local model endpoint, including auth/network/model errors. Real billable requests remain explicitly consented manual checks, not CI prerequisites.
+- [ ] Run full tests/vet and Linux regression checks, inspect packaged documentation/links, and keep native Windows CI/release verification gates passing.
+
+### Scope boundaries
+
+This step is onboarding for the existing interactive agent, not a GUI/desktop-control feature, arbitrary file-editing tool, persistent conversation-memory feature, general installer/updater, or a background-runtime redesign. Do not add Task Scheduler, Google OAuth, email, or daily-brief setup to the mandatory first-conversation path. No implementation, installation, credential changes, or live-instance operations are authorized by adding this plan entry.
+
+---
+
+## Step 23 — macOS runtime adapter
+
+- **Status:** Pending; separate later step, not implemented by Step 21
 - **Branch:** TBD
 - **Pull Request:** TBD
-- **Concept:** After the Linux/systemd runtime and versioned install flow are proven, add OS-specific service adapters while preserving the same user-facing commands and instance-home model.
-
-### Objective
-
-Support the same core commands on additional operating systems:
-
-```bash
-agent-harness init --instance default
-agent-harness daemon --instance default
-agent-harness status --instance default
-agent-harness version
-```
+- **Concept:** Add macOS paths and per-user launchd integration without forking daemon/job logic.
 
 ### Future macOS scope
 
-- Add macOS path defaults:
-
-  ```text
-  ~/Library/Application Support/agent-harness/instances/<instance>/
-  ```
-
-- Add a `launchd` service-manager adapter.
-- Generate or document per-user LaunchAgent plists under:
-
-  ```text
-  ~/Library/LaunchAgents/
-  ```
-
-- Document commands equivalent to:
-
-  ```bash
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agent-harness.default.plist
-  launchctl print gui/$(id -u)/com.agent-harness.default
-  launchctl bootout gui/$(id -u)/com.agent-harness.default
-  ```
-
-### Future Windows scope
-
-- Add Windows path defaults:
-
-  ```text
-  %LOCALAPPDATA%\agent-harness\instances\<instance>\
-  ```
-
-- Add a Windows Service or Task Scheduler adapter.
-- Ensure `agent-harness.exe status --instance default --json` stays compatible with the same status-file schema.
-- Keep PowerShell install/update/status docs separate from Linux and macOS docs.
-
-### Guardrails
-
-- Do not fork daemon/job logic by OS.
-- Keep OS-specific code limited to path defaults, service-manager integration, install docs, and platform-specific tests.
-- Do not make macOS or Windows support a prerequisite for the Linux runtime MVP.
+- Default instance home: `~/Library/Application Support/agent-harness/instances/<instance>/`.
+- Generate/document per-user LaunchAgent plists in `~/Library/LaunchAgents/`.
+- Document `launchctl bootstrap gui/$(id -u)`, `launchctl print`, and `launchctl bootout` lifecycle and login limitations.
+- Add native macOS tests, artifact packaging/checksums, install/update/security docs, and release gates before claiming support.
+- Preserve Linux/systemd and Windows Task Scheduler behavior. Do not make later adapters prerequisites for the original Linux MVP.
 
 ---
 

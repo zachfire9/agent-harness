@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -208,6 +209,10 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "daemon error: %v\n", err)
 		return 1
 	}
+	if err := loadDaemonEnvironmentForOS(paths, goruntime.GOOS); err != nil {
+		fmt.Fprintf(stderr, "daemon error: %v\n", err)
+		return 1
+	}
 	metadata := version.Info()
 	cfg, err := harnessruntime.ReadRuntimeConfig(paths)
 	if err != nil {
@@ -233,6 +238,10 @@ func (a App) runDaemon(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func (a App) runService(args []string, stdout io.Writer, stderr io.Writer) int {
+	return a.runServiceForOS(args, stdout, stderr, goruntime.GOOS)
+}
+
+func (a App) runSystemdService(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 || args[0] != "install" {
 		fmt.Fprintln(stderr, "service error: unsupported service command")
 		return 1
@@ -674,8 +683,15 @@ func parseRuntimeOptions(args []string) (runtimeOptions, error) {
 }
 
 func resolveRuntimePaths(opts runtimeOptions) (harnessruntime.Paths, error) {
+	return resolveRuntimePathsForOS(opts, goruntime.GOOS)
+}
+
+func resolveRuntimePathsForOS(opts runtimeOptions, goos string) (harnessruntime.Paths, error) {
 	if opts.home != "" {
 		return harnessruntime.PathsForHome(opts.home), nil
+	}
+	if goos == "windows" {
+		return harnessruntime.WindowsPaths(os.Getenv("LOCALAPPDATA"), opts.instance)
 	}
 	dataRoot := os.Getenv("XDG_DATA_HOME")
 	if dataRoot == "" {
@@ -718,6 +734,16 @@ func writeHumanStatus(stdout io.Writer, status harnessruntime.Status, instance s
 	}
 	fmt.Fprintf(stdout, "home: %s\n", paths.Home)
 	fmt.Fprintf(stdout, "status_file: %s\n", paths.StatusPath)
+	writeServiceHints(stdout, instance, goruntime.GOOS)
+}
+
+func writeServiceHints(stdout io.Writer, instance, goos string) {
+	if goos == "windows" {
+		fmt.Fprintf(stdout, "service_status_hint:\n  Get-ScheduledTask -TaskName 'agent-harness-%s' | Get-ScheduledTaskInfo\n", instance)
+		fmt.Fprintln(stdout, "logs_hint: Task Scheduler Operational history / LastTaskResult; no daemon output or credentials are captured by the task")
+		fmt.Fprintln(stdout, "status is a persisted snapshot, not proof of a live process; compare last_heartbeat_at with current time")
+		return
+	}
 	fmt.Fprintln(stdout, "service_status_hint:")
 	fmt.Fprintf(stdout, "  systemctl --user status agent-harness@%s.service --no-pager\n", instance)
 	fmt.Fprintln(stdout, "logs_hint:")

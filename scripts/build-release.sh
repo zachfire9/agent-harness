@@ -23,13 +23,14 @@ if ! git -C "${ROOT_DIR}" diff --quiet --ignore-submodules -- 2>/dev/null || ! g
 fi
 
 mkdir -p "${DIST_DIR}"
-rm -f "${DIST_DIR}"/agent-harness_"${SANITIZED_VERSION}"_*.tar.gz "${DIST_DIR}/checksums.txt"
+rm -f "${DIST_DIR}"/agent-harness_"${SANITIZED_VERSION}"_*.tar.gz "${DIST_DIR}"/agent-harness_"${SANITIZED_VERSION}"_*.zip "${DIST_DIR}/checksums.txt"
 
 LDFLAGS="-X github.com/zachfire9/agent-harness/internal/version.Version=${VERSION} -X github.com/zachfire9/agent-harness/internal/version.Commit=${COMMIT} -X github.com/zachfire9/agent-harness/internal/version.BuildDate=${BUILD_DATE} -X github.com/zachfire9/agent-harness/internal/version.Dirty=${DIRTY}"
 
 targets=(
   "linux amd64"
   "linux arm64"
+  "windows amd64"
 )
 
 for target in "${targets[@]}"; do
@@ -37,19 +38,34 @@ for target in "${targets[@]}"; do
   work_dir="$(mktemp -d)"
   binary_name="agent-harness"
   archive="${DIST_DIR}/agent-harness_${SANITIZED_VERSION}_${goos}_${goarch}.tar.gz"
+  if [[ "${goos}" == "windows" ]]; then
+    binary_name="agent-harness.exe"
+    archive="${DIST_DIR}/agent-harness_${SANITIZED_VERSION}_${goos}_${goarch}.zip"
+  fi
   (
     cd "${ROOT_DIR}"
     GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o "${work_dir}/${binary_name}" ./cmd/agent-harness
   )
   cp "${ROOT_DIR}/docs/install-release.md" "${work_dir}/INSTALL.md"
-  tar -C "${work_dir}" -czf "${archive}" "${binary_name}" "INSTALL.md"
+  if [[ "${goos}" == "windows" ]]; then
+    cp "${ROOT_DIR}/docs/windows-runtime.md" "${work_dir}/WINDOWS.md"
+    python3 - "${work_dir}" "${archive}" <<'PY'
+import pathlib, sys, zipfile
+root, archive = pathlib.Path(sys.argv[1]), sys.argv[2]
+with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
+    for name in ('agent-harness.exe', 'INSTALL.md', 'WINDOWS.md'):
+        output.write(root / name, name)
+PY
+  else
+    tar -C "${work_dir}" -czf "${archive}" "${binary_name}" "INSTALL.md"
+  fi
   rm -rf "${work_dir}"
   echo "built ${archive}"
 done
 
 (
   cd "${DIST_DIR}"
-  sha256sum agent-harness_"${SANITIZED_VERSION}"_*.tar.gz > checksums.txt
+  sha256sum agent-harness_"${SANITIZED_VERSION}"_*.tar.gz agent-harness_"${SANITIZED_VERSION}"_*.zip > checksums.txt
 )
 
 echo "wrote ${DIST_DIR}/checksums.txt"
