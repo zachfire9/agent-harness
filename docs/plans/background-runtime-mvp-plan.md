@@ -1488,7 +1488,7 @@ HTML/multipart Gmail bodies remain Step 20. Do not expand this PR into rich-emai
 
 - **Status:** Completed
 - **Branch:** `step-20-rich-gmail-bodies`
-- **Pull Request:** TBD
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/42
 - **Concept:** Make configured scheduled notifications nicer to read in Gmail without hardcoding daily-brief-specific sections in app code.
 
 ### Objective
