@@ -308,6 +308,43 @@ jobs:
 
 The app code only knows generic context producer and renderer types; labels such as daily brief, birthday, or vocabulary live in instance config. `state/progress/<progress_key>.json` stores cursor metadata and item IDs, not document contents, prompts, generated message bodies, tokens, or API keys.
 
+### Pattern-delimited source cards
+
+Use `parser: heading_pattern` when a source has recognizable headings followed by plain text, bullets, or both. For example, this context entry can be added to a scheduled notification job (with a matching `{{ card }}` placeholder in its render prompt):
+
+```yaml
+context:
+  - id: card
+    type: rotating_source_item
+    source:
+      type: local_file
+      path: "data/example-cards.txt"
+      parser: heading_pattern
+      heading_pattern: '^[0-9]+\s*-\s*\S+'
+    selection:
+      strategy: round_robin
+      progress_key: example-cards
+```
+
+Fake `data/example-cards.txt` contents:
+
+```text
+Example reference cards (this preamble is ignored).
+
+1 - Cedar
+An evergreen tree in this fictional collection.
+2024 observations are a fact, not a new heading.
+- Grows in the example garden.
+
+2 - Maple
+A second example card.
+* Has a different leaf shape.
+```
+
+The configured Go regular expression is checked against each trimmed non-empty line. Only matching lines start a new card; the complete matching line becomes its title. All subsequent non-empty plain or bullet lines belong to that card's body until the next matching heading. Leading `- `, `* `, and `• ` bullet markers are removed, empty bullets are skipped, and text before the first heading is ignored. The rendered context contains the title and body joined by newlines. The pattern must be non-empty, syntactically valid, and must not match empty text; otherwise configuration loading fails. Single-quoted YAML preserves regex backslashes.
+
+The same parser and `heading_pattern` work with `type: google_doc` and a configured `alias` instead of a local `path`. Use a separate `progress_key` for each independent rotation. Selection does not advance progress; successful notification delivery advances the selected item and wraps to the first card after the last, as with the existing parsers. `non_empty_lines` and `heading_with_bullets` remain available unchanged.
+
 ## Inspect and manually run jobs
 
 List configured jobs without needing a long-running daemon:

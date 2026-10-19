@@ -323,7 +323,7 @@ func runScheduledNotificationWithClients(paths Paths, now time.Time, cfg JobConf
 	if err != nil {
 		return JobState{}, errors.New("llm generation failed")
 	}
-	body := strings.TrimSpace(response.Message.Content)
+	body := trimTrailingLineWhitespace(strings.TrimSpace(response.Message.Content))
 	if cfg.Render.MaxChars > 0 && len(body) > cfg.Render.MaxChars {
 		body = body[:cfg.Render.MaxChars]
 	}
@@ -360,18 +360,25 @@ func resolveNotificationContext(paths Paths, now time.Time, cfg JobConfig, sourc
 				return nil, nil, err
 			}
 			values[item.ID] = value
-		case "rotating_source_item":
-			source, err := sourceReader(context.Background(), paths, cfg, item.Source.Alias)
+		case "current_date":
+			value, err := currentDateValue(item, now)
 			if err != nil {
 				return nil, nil, err
 			}
-			items, err := ParseProgressItems(item.Source.Parser, source.Text)
+			values[item.ID] = value
+		case "rotating_source_item":
+			source, sourceID, err := readNotificationSource(context.Background(), paths, cfg, item, sourceReader)
+			if err != nil {
+				return nil, nil, err
+			}
+			items, err := ParseProgressItemsWithHeadingPattern(item.Source.Parser, source.Text, item.Source.HeadingPattern)
 			if err != nil {
 				return nil, nil, err
 			}
 			selection, err := SelectNextProgressItem(paths, ProgressSelectionRequest{
 				Key:         item.Selection.ProgressKey,
-				SourceAlias: item.Source.Alias,
+				SourceAlias: sourceID,
+				SourceType:  item.Source.Type,
 				Parser:      item.Source.Parser,
 				Items:       items,
 				Now:         now.UTC(),
@@ -379,13 +386,104 @@ func resolveNotificationContext(paths Paths, now time.Time, cfg JobConfig, sourc
 			if err != nil {
 				return nil, nil, err
 			}
-			values[item.ID] = selection.Item.Title
+			values[item.ID] = progressItemValue(selection.Item)
 			pending = append(pending, pendingProgressCompletion{key: item.Selection.ProgressKey, itemID: selection.Item.ID})
 		default:
 			return nil, nil, fmt.Errorf("unknown notification context type %q", item.Type)
 		}
 	}
 	return values, pending, nil
+}
+
+func progressItemValue(item ProgressItem) string {
+	if len(item.Body) == 0 {
+		return item.Title
+	}
+	lines := append([]string{item.Title}, item.Body...)
+	return strings.Join(lines, "\n")
+}
+
+func readNotificationSource(ctx context.Context, paths Paths, cfg JobConfig, item NotificationContextConfig, googleReader googleDocSourceReader) (GoogleDocSource, string, error) {
+	switch item.Source.Type {
+	case "google_doc":
+		source, err := googleReader(ctx, paths, cfg, item.Source.Alias)
+		return source, "google_doc:" + item.Source.Alias, err
+	case "local_file":
+		path := filepath.ToSlash(filepath.Clean(item.Source.Path))
+		if err := validateInstanceRelativePath(path); err != nil {
+			return GoogleDocSource{}, "", err
+		}
+		data, err := os.ReadFile(filepath.Join(paths.Home, filepath.FromSlash(path)))
+		if err != nil {
+			return GoogleDocSource{}, "", err
+		}
+		return GoogleDocSource{Alias: path, Title: path, Text: string(data)}, "local_file:" + path, nil
+	default:
+		return GoogleDocSource{}, "", fmt.Errorf("unsupported source type %q", item.Source.Type)
+	}
+}
+
+func currentDateValue(cfg NotificationContextConfig, now time.Time) (string, error) {
+	loc := time.UTC
+	if strings.TrimSpace(cfg.Timezone) != "" {
+		loaded, err := time.LoadLocation(cfg.Timezone)
+		if err != nil {
+			return "", err
+		}
+		loc = loaded
+	}
+	t := now.In(loc)
+	format := cfg.Format
+	if strings.TrimSpace(format) == "" {
+		format = "Monday January 2, 2006"
+	}
+	format = strings.ReplaceAll(format, `\n`, "\n")
+	format = localizeDateFormat(format, t)
+	return t.Format(format), nil
+}
+
+func localizeDateFormat(format string, t time.Time) string {
+	weekday := int(t.Weekday())
+	month := int(t.Month())
+	day := t.Day()
+	replacements := map[string]string{
+		"{weekday_es}": []string{"domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"}[weekday],
+		"{weekday_it}": []string{"domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"}[weekday],
+		"{weekday_fr}": []string{"dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"}[weekday],
+		"{weekday_de}": []string{"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"}[weekday],
+		"{month_es}":   []string{"", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"}[month],
+		"{month_it}":   []string{"", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"}[month],
+		"{month_fr}":   []string{"", "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"}[month],
+		"{month_de}":   []string{"", "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"}[month],
+		"{day_es}":     localizedNumber(day, "es"),
+		"{day_it}":     localizedNumber(day, "it"),
+		"{day_fr}":     localizedNumber(day, "fr"),
+		"{day_de_ord}": germanOrdinal(day),
+	}
+	for placeholder, value := range replacements {
+		format = strings.ReplaceAll(format, placeholder, value)
+	}
+	return format
+}
+
+func localizedNumber(n int, lang string) string {
+	numbers := map[string][]string{
+		"es": {"", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve", "veinte", "veintiuno", "veintidós", "veintitrés", "veinticuatro", "veinticinco", "veintiséis", "veintisiete", "veintiocho", "veintinueve", "treinta", "treinta y uno"},
+		"it": {"", "uno", "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "undici", "dodici", "tredici", "quattordici", "quindici", "sedici", "diciassette", "diciotto", "diciannove", "venti", "ventuno", "ventidue", "ventitré", "ventiquattro", "venticinque", "ventisei", "ventisette", "ventotto", "ventinove", "trenta", "trentuno"},
+		"fr": {"", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf", "vingt", "vingt et un", "vingt-deux", "vingt-trois", "vingt-quatre", "vingt-cinq", "vingt-six", "vingt-sept", "vingt-huit", "vingt-neuf", "trente", "trente et un"},
+	}
+	if values, ok := numbers[lang]; ok && n > 0 && n < len(values) {
+		return values[n]
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func germanOrdinal(n int) string {
+	ordinals := []string{"", "erster", "zweiter", "dritter", "vierter", "fünfter", "sechster", "siebter", "achter", "neunter", "zehnter", "elfter", "zwölfter", "dreizehnter", "vierzehnter", "fünfzehnter", "sechzehnter", "siebzehnter", "achtzehnter", "neunzehnter", "zwanzigster", "einundzwanzigster", "zweiundzwanzigster", "dreiundzwanzigster", "vierundzwanzigster", "fünfundzwanzigster", "sechsundzwanzigster", "siebenundzwanzigster", "achtundzwanzigster", "neunundzwanzigster", "dreißigster", "einunddreißigster"}
+	if n > 0 && n < len(ordinals) {
+		return ordinals[n]
+	}
+	return fmt.Sprintf("%d.", n)
 }
 
 func daysUntilDateValue(cfg NotificationContextConfig, now time.Time) (string, error) {
@@ -412,6 +510,14 @@ func renderNotificationPrompt(template string, values map[string]string) string 
 		result = strings.ReplaceAll(result, "{{"+key+"}}", value)
 	}
 	return result
+}
+
+func trimTrailingLineWhitespace(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t\r")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func commaInt(n int) string {
