@@ -1520,7 +1520,7 @@ This step should keep the app-level capability generic:
   - `text/plain` fallback;
   - `text/html` rich body.
 
-- Implement app-controlled conversion from textual content to escaped HTML: headings (`# ` through `### `), paragraphs/line breaks, and flat `- ` / `* ` bullets only. No inline formatting, raw HTML, links, images, scripts, or source-controlled attributes. Indentation is ignored; unrecognized syntax stays literal. The renderer is non-recursive and linear; it adds no dependency or model call. See the [precise format contract](../background-runtime.md#gmail-body-formats-step-20-unreleased).
+- Implement app-controlled conversion from textual content to escaped HTML: headings (`# ` through `### `), paragraphs/line breaks, and flat `- ` / `* ` bullets only. No inline formatting, raw HTML, links, images, scripts, or source-controlled attributes. Indentation is ignored; unrecognized syntax stays literal. The renderer is non-recursive and linear; it adds no dependency or model call. See the [precise format contract](../background-runtime.md#gmail-body-formats-step-20-v015).
 
 - Extend config without breaking the legacy plain-text body/layout:
 
@@ -1560,68 +1560,51 @@ go test ./internal/runtime -run 'TestGmail' -count=1
 
 Verification is isolated: temporary instance directories, fake model/token, and a loopback HTTP Gmail endpoint. The delivery smoke test decodes actual MIME, verifies Unicode and escaped hostile HTML, exercises HTTP failure followed by success, checks one model call per run and advance-only-after-success, and checks persisted job/progress state for content/credential leaks. Existing Step 19 date tests remain in the full suite. No external email, live instance/config/service changes, or live progress consumption is part of this step.
 
-**Availability:** v0.1.4 supports Step 19. Multipart is implemented on this Step 20 branch and is not released yet. Keep the installed runtime on a released version while the branch is open. Merge, publish, and release/install are separate post-merge actions; do not install a local dev build for verification. Any later real Gmail visual check requires separate approval, explicit recipients, and an isolated instance with independent progress keys.
+**Availability:** v0.1.4 supports Step 19; **v0.1.5** includes Step 20 multipart Gmail bodies. Merge, publish, and release/install are separate actions; do not install a local dev build for verification. Any later real Gmail visual check requires separate approval, explicit recipients, and an isolated instance with independent progress keys.
 
 ---
 
-## Future TODO — macOS and Windows runtime adapters
+## Step 21 — Windows current-user background runtime
 
-- **Status:** Future
+- **Status:** Implemented locally; native Windows verification and PR pending
+- **Branch:** `step-21-windows-runtime`
+- **Pull Request:** TBD
+- **Concept:** Add a limited current-user at-login Task Scheduler adapter, without administrator access or a saved password. Reuse shared daemon/jobs/status; leave Linux/systemd unchanged.
+
+### Implementation checklist
+
+- [x] LOCALAPPDATA instance defaults and explicit `--home` support.
+- [x] Generate-only PowerShell task registration with absolute binary/home paths, current SID, Interactive token, Limited privileges, IgnoreNew, restart/battery policy, and no execution time limit.
+- [x] Private Windows env-file ACL validation and literal `*_API_KEY` parser; private/broad fake ACL fixtures.
+- [x] Portable path validation, Windows IANA timezone embedding, OS dispatch and status hint tests.
+- [x] Windows amd64 ZIP plus checksums and install/runtime documentation.
+- [x] Native CLI/ACL/task smoke script and Ubuntu/Windows reusable CI gate before release publication.
+- [ ] Execute native Windows unit/vet and CLI/ACL smoke; record CI evidence.
+- [ ] Execute full native register/query/start/fresh heartbeat/stop/unregister lifecycle in an interactive session; record evidence. Session-0/token-unavailable output is failure, not E2E success.
+- [ ] Open implementation PR after review; merge/release/install require separate approval.
+
+### Verification and limits
+
+Run `go test ./...`, `go vet ./...`, `git diff --check`, Windows crosscompilation, and the actual release builder/checksum/archive inspection locally. Run `scripts/test-windows-runtime.ps1` on native Windows. Local Linux/crosscompile evidence cannot satisfy unchecked native items. See [Windows runtime](../windows-runtime.md) for install, private ACL provisioning before credentials, lifecycle, forcibly stopped/stale snapshots, and cleanup.
+
+The adapter runs only while its user is logged in: no boot/before-login or after-logout promise, no Windows Service, no elevated task, no automatic output capture. Hosted runners without an Interactive token fail the strict lifecycle gate; use an approved interactive runner rather than masking that failure. No live task registration, install, credential use, merge, or publishing is part of local development verification.
+
+---
+
+## Step 22 — macOS runtime adapter
+
+- **Status:** Pending; separate later step, not implemented by Step 21
 - **Branch:** TBD
 - **Pull Request:** TBD
-- **Concept:** After the Linux/systemd runtime and versioned install flow are proven, add OS-specific service adapters while preserving the same user-facing commands and instance-home model.
-
-### Objective
-
-Support the same core commands on additional operating systems:
-
-```bash
-agent-harness init --instance default
-agent-harness daemon --instance default
-agent-harness status --instance default
-agent-harness version
-```
+- **Concept:** Add macOS paths and per-user launchd integration without forking daemon/job logic.
 
 ### Future macOS scope
 
-- Add macOS path defaults:
-
-  ```text
-  ~/Library/Application Support/agent-harness/instances/<instance>/
-  ```
-
-- Add a `launchd` service-manager adapter.
-- Generate or document per-user LaunchAgent plists under:
-
-  ```text
-  ~/Library/LaunchAgents/
-  ```
-
-- Document commands equivalent to:
-
-  ```bash
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agent-harness.default.plist
-  launchctl print gui/$(id -u)/com.agent-harness.default
-  launchctl bootout gui/$(id -u)/com.agent-harness.default
-  ```
-
-### Future Windows scope
-
-- Add Windows path defaults:
-
-  ```text
-  %LOCALAPPDATA%\agent-harness\instances\<instance>\
-  ```
-
-- Add a Windows Service or Task Scheduler adapter.
-- Ensure `agent-harness.exe status --instance default --json` stays compatible with the same status-file schema.
-- Keep PowerShell install/update/status docs separate from Linux and macOS docs.
-
-### Guardrails
-
-- Do not fork daemon/job logic by OS.
-- Keep OS-specific code limited to path defaults, service-manager integration, install docs, and platform-specific tests.
-- Do not make macOS or Windows support a prerequisite for the Linux runtime MVP.
+- Default instance home: `~/Library/Application Support/agent-harness/instances/<instance>/`.
+- Generate/document per-user LaunchAgent plists in `~/Library/LaunchAgents/`.
+- Document `launchctl bootstrap gui/$(id -u)`, `launchctl print`, and `launchctl bootout` lifecycle and login limitations.
+- Add native macOS tests, artifact packaging/checksums, install/update/security docs, and release gates before claiming support.
+- Preserve Linux/systemd and Windows Task Scheduler behavior. Do not make later adapters prerequisites for the original Linux MVP.
 
 ---
 

@@ -1,6 +1,6 @@
 # Background Runtime
 
-`agent-harness` can run as a named background instance. The first supported runtime manager is Linux `systemd --user`.
+`agent-harness` can run as a named background instance. This guide covers Linux `systemd --user`. Step 21 adds a separate [Windows Task Scheduler guide](windows-runtime.md) (current-user, Interactive, Limited, at-login; native verification pending). macOS is pending Step 22. Linux behavior is unchanged.
 
 For a task-oriented walkthrough, start with [Configure a daily brief email](configure-daily-brief.md). This document is the field-level runtime reference.
 
@@ -311,9 +311,9 @@ jobs:
 
 The app code only knows generic context producer and renderer types; labels such as daily brief, birthday, or vocabulary live in instance config. `state/progress/<progress_key>.json` stores cursor metadata and item IDs, not document contents, prompts, generated message bodies, tokens, or API keys.
 
-### Gmail body formats (Step 20, unreleased)
+### Gmail body formats (Step 20, v0.1.5)
 
-**Availability:** v0.1.4 includes Step 19 date/local-source/card parsing features. The `body_format` option below is implemented on `step-20-rich-gmail-bodies` and is **not yet in a release**. Do not add it to a v0.1.4 live instance expecting rich mail; older binaries may ignore unknown keys. Release installation remains a separate post-merge action.
+**Availability:** v0.1.4 includes Step 19 date/local-source/card parsing features. The `body_format` option below is available in **v0.1.5** (Step 20). v0.1.4 does not render rich mail; older binaries may ignore unknown keys. Release installation remains a separately approved action.
 
 ```yaml
 notifier:

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -78,7 +79,7 @@ func TestInitInstanceCreatesSelfContainedHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected google secrets directory: %v", err)
 	}
-	if secretsInfo.Mode().Perm() != 0o700 {
+	if goruntime.GOOS != "windows" && secretsInfo.Mode().Perm() != 0o700 {
 		t.Fatalf("expected secrets directory mode 0700, got %o", secretsInfo.Mode().Perm())
 	}
 	if _, err := os.Stat(filepath.Join(paths.ConfigDir, "config.yaml")); err != nil {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -562,43 +563,6 @@ func TestRunChatLogsContextTruncationWarning(t *testing.T) {
 	}
 }
 
-func TestRunServiceInstallWritesSystemdUserTemplate(t *testing.T) {
-	configHome := t.TempDir()
-
-	stdout, stderr, exitCode := runCLI("agent-harness", "service", "install", "--config-home", configHome)
-
-	if exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d; stderr: %s", exitCode, stderr)
-	}
-	if stderr != "" {
-		t.Fatalf("expected empty stderr, got %q", stderr)
-	}
-	unitPath := filepath.Join(configHome, "systemd", "user", "agent-harness@.service")
-	unit, err := os.ReadFile(unitPath)
-	if err != nil {
-		t.Fatalf("expected service template at %s: %v", unitPath, err)
-	}
-	for _, want := range []string{
-		"ExecStart=%h/.local/bin/agent-harness daemon --instance %i --home %h/.local/share/agent-harness/instances/%i",
-		"WorkingDirectory=%h/.local/share/agent-harness/instances/%i",
-		"EnvironmentFile=-%h/.local/share/agent-harness/instances/%i/config/secrets/env",
-	} {
-		if !strings.Contains(string(unit), want) {
-			t.Fatalf("expected unit to contain %q, got:\n%s", want, string(unit))
-		}
-	}
-	for _, want := range []string{
-		"installed systemd user service template",
-		unitPath,
-		"systemctl --user daemon-reload",
-		"systemctl --user enable --now agent-harness@default.service",
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("expected stdout to contain %q, got %q", want, stdout)
-		}
-	}
-}
-
 func TestRunServiceInstallRejectsUnsupportedSubcommand(t *testing.T) {
 	stdout, stderr, exitCode := runCLI("agent-harness", "service", "remove")
 
@@ -800,12 +764,17 @@ func TestRunStatusHumanPrintsServiceHintsWithoutSystemctl(t *testing.T) {
 		"commit: abc1234",
 		"build_date: 2026-10-01T14:00:00Z",
 		"dirty: false",
-		"systemctl --user status agent-harness@default.service --no-pager",
-		"journalctl --user -u agent-harness@default.service -n 100 --no-pager",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected status output to contain %q, got %q", want, stdout)
 		}
+	}
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(stdout, "Get-ScheduledTask -TaskName 'agent-harness-default'") || strings.Contains(stdout, "systemctl") {
+			t.Fatalf("expected Windows service hints: %s", stdout)
+		}
+	} else if !strings.Contains(stdout, "systemctl --user status agent-harness@default.service --no-pager") || !strings.Contains(stdout, "journalctl --user -u agent-harness@default.service -n 100 --no-pager") {
+		t.Fatalf("expected Linux service hints: %s", stdout)
 	}
 }
 

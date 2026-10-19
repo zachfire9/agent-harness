@@ -42,7 +42,7 @@ The project currently has:
 - durable JSONL run/session logs under the configured local run-log directory, with structured context/truncation records and secret redaction
 - provider-neutral vector store abstraction with a default `none` implementation for future RAG support without requiring a vector database yet
 - user-level background runtime commands for named instances, status files, and systemd user service installation
-- version metadata embedded at build time plus automated GitHub Release artifacts for Linux amd64/arm64 installs
+- version metadata embedded at build time plus automated GitHub Release artifacts for Linux amd64/arm64 and Windows amd64 installs (Windows added in Step 21, native verification pending)
 - a configurable scheduled-job registry with interval and daily time-of-day schedules, a default heartbeat job, a local check-in job, notification test jobs, and bounded AI email jobs that can be inspected or manually triggered from the CLI
 - Google account connection metadata commands for secret-safe auth status, composable scope-alias inspection, local token revocation, and access-token refresh for Google-backed actions
 - a Google Docs read-only source adapter that reads explicitly configured document IDs by local alias
@@ -77,7 +77,9 @@ The `internal` packages are split so each concept can be tested in isolation. Th
 
 ## Configure a scheduled email
 
-For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. **v0.1.4 supports the Step 19 example** (`current_date`, local sources, and configurable card headings); v0.1.3 does not. Optional safe rich Gmail bodies (`notifier.gmail.body_format: multipart`) are implemented on the **Step 20 branch, not yet released**. Plain remains the default; see [body formats](docs/background-runtime.md#gmail-body-formats-step-20-unreleased) before opting in.
+For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. **v0.1.4 supports the Step 19 example** (`current_date`, local sources, and configurable card headings); v0.1.3 does not. Optional safe rich Gmail bodies (`notifier.gmail.body_format: multipart`) are available in **v0.1.5**. Plain remains the default; see [body formats](docs/configure-daily-brief.md#optional-rich-gmail-bodies-step-20-v015).
+
+Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification is pending; v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. macOS/launchd is the separate pending Step 22.
 
 ## Quick start
 

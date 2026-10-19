@@ -2,6 +2,8 @@
 
 Use this flow on machines that should run `agent-harness` without a source checkout or Go toolchain.
 
+The shell commands below are Linux-specific. For Windows amd64 (added by Step 21, native verification pending), use the [PowerShell download/checksum, stable binary install, private ACL, and Task Scheduler guide](windows-runtime.md). Windows support is not included in v0.1.5; select a later release that actually publishes a Windows asset. macOS remains pending Step 22.
+
 Release artifacts are built under `dist/` by:
 
 ```bash
@@ -28,11 +30,12 @@ Tag:            v0.1.0
 Binary version: 0.1.0
 ```
 
-The first required targets are:
+The current build targets are:
 
 ```text
 linux-amd64
 linux-arm64
+windows-amd64 (Step 21)
 ```
 
 Future targets may include:
@@ -40,7 +43,6 @@ Future targets may include:
 ```text
 darwin-arm64
 darwin-amd64
-windows-amd64
 ```
 
 ## Artifact layout
@@ -57,6 +59,8 @@ Each archive contains:
 agent-harness
 INSTALL.md
 ```
+
+The Windows ZIP contains `agent-harness.exe`, `INSTALL.md`, and `WINDOWS.md`; it is included in the same `checksums.txt`. The target does not need Go or Python. Building ZIPs on the release host requires Python 3 in addition to Go and the existing Unix tools.
 
 Checksums are written to:
 
@@ -149,11 +153,12 @@ git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
 
-The release workflow runs `go test ./...`, builds Linux `amd64` and `arm64` archives with `scripts/build-release.sh`, verifies `dist/checksums.txt`, and publishes these GitHub Release assets:
+The release workflow first requires the reusable native Ubuntu/Windows test/vet workflow, including the isolated Windows CLI/ACL and Task Scheduler lifecycle smoke. A hosted runner lacking an Interactive token fails this gate; it must not publish Windows artifacts as verified. After that gate, it builds Linux `amd64`/`arm64` tarballs and the Windows `amd64` ZIP with `scripts/build-release.sh`, verifies `dist/checksums.txt`, and publishes these GitHub Release assets:
 
 ```text
 agent-harness_${VERSION}_linux_amd64.tar.gz
 agent-harness_${VERSION}_linux_arm64.tar.gz
+agent-harness_${VERSION}_windows_amd64.zip
 checksums.txt
 ```
 

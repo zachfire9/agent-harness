@@ -9,7 +9,12 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
   release:
+    needs: verify
     name: Build and publish release
     runs-on: ubuntu-latest
     steps:
@@ -45,6 +50,7 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             "dist/agent-harness_${VERSION}_linux_amd64.tar.gz" \
             "dist/agent-harness_${VERSION}_linux_arm64.tar.gz" \
+            "dist/agent-harness_${VERSION}_windows_amd64.zip" \
             "dist/checksums.txt" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes
