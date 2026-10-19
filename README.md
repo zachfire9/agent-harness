@@ -4,6 +4,10 @@ A small Go-based AI agent harness built one reviewable learning step at a time.
 
 The goal of this repo is to make each agent concept understandable through small commits and pull requests. Every implementation step includes deterministic tests before it lands on `main`.
 
+## Start here on Windows
+
+**[Your first Windows conversation](docs/windows-first-conversation.md)** walks from a verified binary download to a session-only API key, config check, interactive chat, and safe sample-file tools—no Go, Git, daemon, or scheduled task needed. For optional background jobs instead, see the [Windows runtime guide](docs/windows-runtime.md).
+
 ## What this project demonstrates
 
 This is intentionally not a full production assistant. It is a learning-focused local CLI app that shows the main moving pieces behind an agent harness:
@@ -79,7 +83,7 @@ The `internal` packages are split so each concept can be tested in isolation. Th
 
 For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. **v0.1.4 supports the Step 19 example** (`current_date`, local sources, and configurable card headings); v0.1.3 does not. Optional safe rich Gmail bodies (`notifier.gmail.body_format: multipart`) are available in **v0.1.5**. Plain remains the default; see [body formats](docs/configure-daily-brief.md#optional-rich-gmail-bodies-step-20-v015).
 
-Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification is pending; v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. macOS/launchd is the separate pending Step 22.
+Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification passed in the isolated CI run linked in that guide; a published Windows release is still pending, and v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. macOS/launchd is the separate pending Step 22.
 
 ## Quick start
 
@@ -148,7 +152,7 @@ AGENT_RUN_LOG_DIR=.agent-harness/runs
 VECTOR_STORE_PROVIDER=none
 ```
 
-`.env` is listed in `.gitignore`, so local secrets stay out of git. `.env.example` is safe to commit because it contains placeholders only.
+In this source checkout, `.env` is listed in `.gitignore` to prevent accidental staging of untracked keys; this is not encryption or protection for already-tracked files. A downloaded-binary workspace does not inherit that ignore rule. `.env.example` contains placeholders only. For a session-only key without a secret file, use the [Windows walkthrough](docs/windows-first-conversation.md#3-add-a-session-only-api-key-and-check-configuration).
 
 You can also set values directly in PowerShell instead of using `.env`:
 
