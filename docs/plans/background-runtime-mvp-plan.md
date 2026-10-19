@@ -1466,6 +1466,7 @@ Live verification should start with manual `jobs run` before enabling the notifi
 - Pass complete source-card headings and bodies into notification templates.
 - Add validated `heading_pattern` parsing for mixed plain-text/bulleted cards using a configured regular expression.
 - Strip trailing per-line whitespace from generated plain-text notifications.
+- Document an end-to-end [daily brief setup walkthrough](../configure-daily-brief.md), with a complete synthetic configuration, OAuth handoff/setup, manual-versus-service environments, isolated testing, and service verification.
 - Preserve independent rotation keys and advancement only after successful delivery.
 
 ### Dev testing and verification

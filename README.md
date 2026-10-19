@@ -75,6 +75,10 @@ agent-harness/
 
 The `internal` packages are split so each concept can be tested in isolation. The CLI layer coordinates dependencies, but the reusable agent behavior lives below it.
 
+## Configure a scheduled email
+
+For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. The full example requires Step 19 capabilities; it is not compatible with the v0.1.3 release. See the guide for availability details.
+
 ## Quick start
 
 Run the placeholder command:

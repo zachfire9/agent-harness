@@ -2,6 +2,8 @@
 
 `agent-harness` can run as a named background instance. The first supported runtime manager is Linux `systemd --user`.
 
+For a task-oriented walkthrough, start with [Configure a daily brief email](configure-daily-brief.md). This document is the field-level runtime reference.
+
 ## Layout
 
 Recommended user-level layout:
@@ -244,9 +246,10 @@ jobs:
 
 The `scheduled_notification` job type composes reusable notification pieces without hardcoding user-specific sections in Go. Each job declares named context values, renders a prompt template with those values, sends one LLM-generated body through the configured notifier, and advances any rotating-source progress only after delivery succeeds.
 
-Supported context producers in this first slice:
+Supported context producers:
 
-- `days_until_date`: computes a deterministic date countdown from config.
+- `days_until_date`: computes a deterministic date countdown from config using UTC calendar days.
+- `current_date`: supplies the job run date with optional timezone and standard Go layout; translation instructions belong in the configured LLM prompt.
 - `rotating_source_item`: reads a configured source, parses items, selects the next item with durable round-robin progress, and exposes the selected item text as a context value.
 
 Example:
@@ -496,16 +499,17 @@ The progress state records safe metadata only:
 
 It does not store full Google Doc text, delivered message bodies, OAuth tokens, refresh tokens, client secrets, or credential JSON.
 
-Current parser primitives are internal runtime capabilities for future jobs:
+Current parsers are available to `scheduled_notification` rotating sources (`google_doc` or instance-relative `local_file`):
 
 - `non_empty_lines`: trims blank lines and treats each remaining line as one item;
 - `heading_with_bullets`: treats a heading/title followed by bullet lines as a card with `title` and `body` fields.
+- `heading_pattern`: uses a configured regular expression to delimit headings with plain or bulleted body lines; see [pattern-delimited source cards](#pattern-delimited-source-cards).
 
 The selector uses cycle snapshots: it parses the current source into ordered item IDs at the start of a cycle, walks that snapshot until the last item, and refreshes the snapshot only at the next cycle boundary. This avoids surprising skips or repeats if a document is edited midway through a cycle.
 
 Cursor advancement is explicit. A caller selects/peeks the next item, performs the work, and advances progress only after successful completion or delivery. Failed sends should leave the cursor unchanged so the same item can be retried.
 
-Step 17 intentionally adds these primitives before adding a user-facing scheduled digest job. Step 18 will wire the Google Docs source, parser, progress cursor, and notifier together.
+Step 18 connects source selection and progress to scheduled notification delivery; Step 19 extends date context, local sources, and configurable card parsing. See the [setup walkthrough](configure-daily-brief.md) for a complete example.
 
 ## Run a daemon smoke test
 
