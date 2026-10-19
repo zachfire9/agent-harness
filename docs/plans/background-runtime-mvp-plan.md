@@ -1591,7 +1591,51 @@ The adapter runs only while its user is logged in: no boot/before-login or after
 
 ---
 
-## Step 22 — macOS runtime adapter
+## Step 22 — Guided Windows onboarding and first conversation
+
+- **Status:** Pending; planning only, implementation is a separate post-Step-21 PR
+- **Branch:** TBD (planned: `step-22-windows-onboarding`)
+- **Pull Request:** TBD
+- **Concept:** Replace repeated PowerShell setup blocks with a first-run wizard and a repeatable chat entry point. Download/extract the Windows ZIP, run `agent-harness.exe setup`, answer a few prompts, then use `agent-harness chat` or a shortcut on later visits.
+
+### Objective and user flow
+
+1. Download/extract a verified Windows release; no Go, Git, source checkout, administrator privileges, or MSI installer required.
+2. Run `agent-harness.exe setup` from the extracted folder.
+3. Select an OpenAI-compatible provider endpoint and model with sensible defaults; show API billing and external-data-transmission notices.
+4. Enter the API key using hidden input. Offer Windows Credential Manager storage for reuse and a clearly labeled session-only alternative; never silently fall back to plaintext storage.
+5. Choose/create a workspace and remember it. Show exactly which folder tools will access; do not default to exposing the entire user profile.
+6. Review the proposed changes, then save non-secret settings in a consistent per-user location. Offer a stable per-user executable location if launched from a temporary extraction folder; confirm before copying or replacing anything.
+7. Optionally test the connection, with explicit consent that it sends a request and may incur API charges. Offline local validation must be distinct from provider/key/model validation.
+8. Offer to start chatting. On a later launch, `agent-harness chat` or an optional **Chat with Agent Harness** shortcut restores saved settings and the selected workspace without repasting environment blocks. This does not imply resuming conversation history.
+
+### Implementation checklist / acceptance criteria
+
+- [ ] Add a testable interactive `setup` command with clear defaults, hidden secret input, cancellation/EOF handling, and helpful retry/error messages. Non-interactive invocations must fail clearly rather than hang.
+- [ ] Persist provider/model selectors, workspace, and onboarding preferences separately from secrets; use Windows Credential Manager for the saved API key and persist only its reference. Allow replacement/removal and explain provider-side revocation separately. Do not print secrets or pass them in process arguments, shortcuts, logs, or diagnostic output.
+- [ ] Wire `chat`, `ask`, and `config check` to the saved configuration/credential resolver. Define and document deterministic precedence with existing process environment and workspace `.env` overrides, preserving existing explicit configuration behavior. Keep background instance YAML/private-env handling separate; do not silently reconfigure daemon jobs.
+- [ ] Make selected-workspace behavior explicit: allow intentionally using a different current project directory without a silent directory switch; ensure shortcut working directory and any workspace-selection mechanism agree with file-tool sandboxing. Retain existing tool restrictions and explain that model-supplied `confirm:true` is not human approval.
+- [ ] Offer opt-in user PATH integration and a terminal chat shortcut; never modify machine PATH or require elevation. Use stable absolute executable paths, quote paths safely, and keep secrets out of shortcut arguments. Skip existing PATH entries and review conflicts rather than replacing another installation.
+- [ ] Make setup rerunnable without losing settings or overwriting credentials/workspaces unexpectedly. Document rollback/removal for settings, credential entries, optional shortcut, and user PATH entry; do not delete user workspace files.
+- [ ] Keep first-run logging off unless the user opts in; distinguish in-memory chat history from diagnostic logs and persistent settings.
+- [ ] Replace the beginner walkthrough's large setup blocks with the actual wizard flow once available, retaining manual setup as an advanced fallback. Link from README and packaged Windows instructions, and state the minimum supporting release.
+- [ ] Preserve Linux CLI behavior and the shared agent/tool loop. Keep platform-specific credential, path, and shortcut integration behind small testable boundaries.
+
+### Tests and verification
+
+- [ ] Use RED/GREEN tests for wizard input/defaults/cancel/non-TTY behavior, saved-config round trips and precedence, fake credential-store success/failure/removal, secret-safe diagnostics, and idempotent setup with paths containing spaces/non-ASCII characters.
+- [ ] Test workspace selection and shortcut/user-PATH generation, including conflicts and cleanup, without altering real developer settings. No test may register background jobs or use real API keys by default.
+- [ ] Run native Windows isolated smoke: extracted binary setup with synthetic input -> fresh-process config check -> chat startup/exit -> rerun setup -> removal. Exercise a uniquely named fake Credential Manager entry and temporary shortcut/workspace, cleaning up in `finally`; never access existing user credentials.
+- [ ] Test optional connection validation through a fake local model endpoint, including auth/network/model errors. Real billable requests remain explicitly consented manual checks, not CI prerequisites.
+- [ ] Run full tests/vet and Linux regression checks, inspect packaged documentation/links, and keep native Windows CI/release verification gates passing.
+
+### Scope boundaries
+
+This step is onboarding for the existing interactive agent, not a GUI/desktop-control feature, arbitrary file-editing tool, persistent conversation-memory feature, general installer/updater, or a background-runtime redesign. Do not add Task Scheduler, Google OAuth, email, or daily-brief setup to the mandatory first-conversation path. No implementation, installation, credential changes, or live-instance operations are authorized by adding this plan entry.
+
+---
+
+## Step 23 — macOS runtime adapter
 
 - **Status:** Pending; separate later step, not implemented by Step 21
 - **Branch:** TBD

@@ -83,7 +83,7 @@ The `internal` packages are split so each concept can be tested in isolation. Th
 
 For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. **v0.1.4 supports the Step 19 example** (`current_date`, local sources, and configurable card headings); v0.1.3 does not. Optional safe rich Gmail bodies (`notifier.gmail.body_format: multipart`) are available in **v0.1.5**. Plain remains the default; see [body formats](docs/configure-daily-brief.md#optional-rich-gmail-bodies-step-20-v015).
 
-Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification passed in the isolated CI run linked in that guide; a published Windows release is still pending, and v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. macOS/launchd is the separate pending Step 22.
+Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification passed in the isolated CI run linked in that guide; a published Windows release is still pending, and v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. Guided Windows onboarding is the next planned Step 22; macOS/launchd follows as Step 23.
 
 ## Quick start
 
