@@ -19,6 +19,7 @@ import (
 	"github.com/zachfire9/agent-harness/internal/agent"
 	"github.com/zachfire9/agent-harness/internal/config"
 	"github.com/zachfire9/agent-harness/internal/llm"
+	"github.com/zachfire9/agent-harness/internal/onboarding"
 	"github.com/zachfire9/agent-harness/internal/runlog"
 	harnessruntime "github.com/zachfire9/agent-harness/internal/runtime"
 	"github.com/zachfire9/agent-harness/internal/tools"
@@ -99,12 +100,32 @@ func (a App) WithVectorStore(store vectorstore.Store) App {
 
 // Run executes the agent-harness command and returns a process-style exit code.
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
-	if len(args) >= 3 && args[1] == "config" && args[2] == "check" {
-		cfg, err := config.Load()
+	if len(args) > 1 && args[1] == "ask" {
+		clean, _, _, err := interactiveOptions(args)
+		if err == nil && strings.TrimSpace(strings.Join(clean[2:], " ")) == "" {
+			return App{}.Run(clean, stdout, stderr)
+		}
+	}
+	if len(args) > 1 && args[1] == "setup" {
+		return runSetup(args[2:], stdout, stderr)
+	}
+	if len(args) > 1 && (args[1] == "chat" || args[1] == "ask" || (len(args) > 2 && args[1] == "config" && args[2] == "check")) {
+		r, err := resolveInteractive(args, goruntime.GOOS, onboarding.NativeStore())
 		if err != nil {
 			fmt.Fprintf(stderr, "config error: %v\n", err)
 			return 1
 		}
+		return runResolvedInteractive(r, stdout, stderr)
+	}
+	return App{}.Run(args, stdout, stderr)
+}
+
+func runResolvedInteractive(r interactiveResolution, stdout, stderr io.Writer) int {
+	args, cfg := r.args, r.cfg
+	if r.announce {
+		fmt.Fprintf(stdout, "Workspace: %s (file-tool sandbox; use --workspace current for the current project)\n", r.workspace)
+	}
+	if len(args) >= 3 && args[1] == "config" && args[2] == "check" {
 		if _, err := vectorstore.New(vectorstore.Config{Provider: cfg.VectorStoreProvider}); err != nil {
 			fmt.Fprintf(stderr, "config error: %v\n", err)
 			return 1
@@ -116,11 +137,16 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return App{}.Run(args, stdout, stderr)
 	}
 
-	cfg, err := config.Load()
+	old, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "config error: %v\n", err)
+		fmt.Fprintln(stderr, "workspace unavailable")
 		return 1
 	}
+	if err = os.Chdir(r.workspace); err != nil {
+		fmt.Fprintln(stderr, "cannot enter selected workspace")
+		return 1
+	}
+	defer os.Chdir(old)
 
 	store, err := vectorstore.New(vectorstore.Config{Provider: cfg.VectorStoreProvider})
 	if err != nil {

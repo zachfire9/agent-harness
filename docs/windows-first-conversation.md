@@ -1,209 +1,134 @@
 # Your first Windows conversation
 
-[README](../README.md) · [Windows background runtime guide](windows-runtime.md)
+[Project README](https://github.com/zachfire9/agent-harness#readme) · [Windows background runtime guide](https://github.com/zachfire9/agent-harness/blob/main/docs/windows-runtime.md)
 
-Start here to talk to the agent in a normal, **non-administrator PowerShell 5.1 or 7** window. You need Windows amd64, internet access, and an OpenAI API account with billing enabled. You do **not** need Go, Git, GitHub CLI, a source checkout, `init`, a daemon, or a service. Background scheduling is a separate, optional path in the [Windows runtime guide](windows-runtime.md).
+Use a normal **non-administrator PowerShell 5.1 or 7** window on Windows amd64. You need internet access and an OpenAI-compatible API account with billing enabled. No Go, Git, source checkout, `init`, daemon, Task Scheduler, or installer is needed to chat.
 
-This walkthrough uses a new sample workspace and a session-only API key; it writes no key to disk. Only paste PowerShell blocks into PowerShell. Text under `You:` belongs inside the agent's chat prompt.
+**Availability:** this guide requires the first release containing **Step 22 (`setup`) or later**. No numbered supporting release is claimed yet; v0.1.5 does not contain it, and a Step-21-only Windows binary is insufficient. Implementation, Linux checks, and [native Windows onboarding verification](https://github.com/zachfire9/agent-harness/actions/runs/39298133159) passed on the Step 22 branch; publication is still pending. Stop if the release does not explicitly include Step 22.
 
-## 1. Download, verify, and install the binary
+## 1. Download, verify, and extract
 
-Open the project's [Releases page](https://github.com/zachfire9/agent-harness/releases) in your browser. Choose a published release whose assets include both `agent-harness_<version>_windows_amd64.zip` and `checksums.txt`. **Replace the version placeholder below** with its version without the leading `v`. This is not a claim that a new Windows release has already been published: v0.1.5 has no Windows asset. If no release has the ZIP yet, stop here and wait for one.
-
-Run this whole block. It downloads into a unique temporary folder, verifies exactly the selected ZIP's SHA256 entry, and installs to a stable per-user path:
-
-```powershell
-$ErrorActionPreference = 'Stop'
-$version = 'REPLACE_WITH_WINDOWS_RELEASE_VERSION'
-if ($version -eq 'REPLACE_WITH_WINDOWS_RELEASE_VERSION') { throw 'Choose a published Windows release first' }
-# TLS 1.2 also supports downloads from Windows PowerShell 5.1.
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$asset = "agent-harness_${version}_windows_amd64.zip"
-$base = "https://github.com/zachfire9/agent-harness/releases/download/v$version"
-$stage = Join-Path $env:TEMP ('agent-harness-download-' + [guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $stage | Out-Null
-Invoke-WebRequest -UseBasicParsing -Uri "$base/$asset" -OutFile (Join-Path $stage $asset)
-Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile (Join-Path $stage 'checksums.txt')
-$lines = @(Get-Content -LiteralPath (Join-Path $stage 'checksums.txt') | Where-Object { $_ -match ('^[0-9a-fA-F]{64}\s+\*?' + [regex]::Escape($asset) + '$') })
-if ($lines.Count -ne 1) { throw 'Missing or ambiguous checksum entry; do not install' }
-$expected = ($lines[0] -split '\s+')[0]
-$actual = (Get-FileHash -LiteralPath (Join-Path $stage $asset) -Algorithm SHA256).Hash
-if ($actual -ne $expected) { throw 'Checksum mismatch; do not install' }
-Write-Output 'Checksum verified'
-Expand-Archive -LiteralPath (Join-Path $stage $asset) -DestinationPath (Join-Path $stage 'unpacked')
-$bin = Join-Path $env:LOCALAPPDATA 'agent-harness\bin'
-New-Item -ItemType Directory -Path $bin -Force | Out-Null
-$exe = Join-Path $bin 'agent-harness.exe'
-# Do not silently replace an existing install used by another session/task.
-if (Test-Path -LiteralPath $exe) { throw 'Binary already installed; use it or follow the runtime update guide' }
-Copy-Item -LiteralPath (Join-Path $stage 'unpacked\agent-harness.exe') -Destination $exe
-& $exe version
-if ($LASTEXITCODE -ne 0) { throw 'Binary version check failed' }
-```
-
-Expected: `Checksum verified`, then build/version metadata matching your selected release. Keep using `& $exe` (PowerShell's call operator); no PATH change is required. The ZIP also contains `INSTALL.md` and `WINDOWS.md`.
-
-If a download returns 404, check the release version and asset name; do not substitute a Linux archive. If verification fails, stop and download both assets again from the trusted release. A matching checksum detects corruption, **not a compromised publisher**. Do not bypass Windows/organizational security warnings or run as administrator to make an untrusted binary work. For an existing install, set `$exe = Join-Path $env:LOCALAPPDATA 'agent-harness\bin\agent-harness.exe'` and check `& $exe version`; see the [runtime guide](windows-runtime.md#status-diagnostics-stop-update-removal) for updates.
-
-## 2. Create a safe workspace
-
-The **current working directory is the workspace**, not the executable's directory or a runtime instance home. Do not start from your user profile, Downloads, or a folder full of private documents. This block deliberately refuses to overwrite an existing sample folder:
+1. Open [Releases](https://github.com/zachfire9/agent-harness/releases). Download `agent-harness_<version>_windows_amd64.zip` and `checksums.txt` from the **same** Step-22-capable release.
+2. In PowerShell, run `Get-FileHash -Algorithm SHA256 -LiteralPath '<downloaded ZIP path>'`. Compare its entire hash with the line for that exact ZIP in `checksums.txt`. Stop on a missing/duplicate entry or mismatch. A matching checksum detects corruption, not a compromised publisher; download only from the trusted release. Do not bypass organizational security warnings or elevate to run an untrusted binary.
+3. Right-click the ZIP → **Extract All** into a new folder. Open PowerShell in that extracted folder. The ZIP contains `agent-harness.exe`, `INSTALL.md`, `WINDOWS.md`, and `FIRST-CONVERSATION.md` (this guide).
+4. Run:
 
 ```powershell
-$workspace = Join-Path $env:LOCALAPPDATA 'agent-harness\workspaces\first-conversation'
-if (Test-Path -LiteralPath $workspace) { throw 'Sample workspace already exists; use step 7 to return, or choose a new empty folder' }
-New-Item -ItemType Directory -Path $workspace -Force | Out-Null
-Set-Location -LiteralPath $workspace
-@(
-    'Project: Weekend garden'
-    'TODO: Buy basil seeds'
-    'TODO: Water the seedlings'
-) | Set-Content -LiteralPath '.\notes.txt' -Encoding ASCII
-Get-Location
-Get-Content -LiteralPath '.\notes.txt'
+.\agent-harness.exe version
+.\agent-harness.exe setup
 ```
 
-Expected: a path ending in `agent-harness\workspaces\first-conversation` and the three sample lines. You created this file with PowerShell; the agent does not have a general-purpose file-write tool.
+Do not paste PowerShell commands at the later `You:` chat prompt. Setup needs a real terminal; redirected/piped input fails instead of waiting for secrets.
 
-## 3. Add a session-only API key and check configuration
+## 2. Answer the wizard
 
-Create a key in the [OpenAI Platform](https://platform.openai.com/api-keys). **ChatGPT subscriptions do not pay for API requests.** Enable API billing and review pricing, model access, and usage/budget alerts in your account before continuing; a budget alert is not necessarily a hard spending cap. Use a dedicated project/key with only the access needed. Tool loops and conversation summaries can make multiple billable model calls per turn.
+Press Enter to accept a displayed default. Enter `cancel` to stop (including at the hidden-key prompt). EOF/Ctrl+C also stops setup. Before the final review is accepted, no settings or credential are saved; after applying, cancellation does **not** undo saved changes.
 
-Paste the key only into the hidden prompt below, not into a command, chat message, screenshot, or document. This sets the process environment for this PowerShell window and its child processes, not a persistent user/machine variable:
+- **Endpoint:** default `https://api.openai.com/v1`. Other OpenAI-compatible chat-completions providers work with their own URL/key/model. HTTPS is required; HTTP is allowed only for loopback development. Do not put a key in the endpoint URL, model name, or workspace path.
+- **Model:** default `gpt-4.1-mini`; confirm availability/tool support and pricing with your provider. A default is not a promise of account access or the newest model.
+- **Workspace:** default is `AgentHarnessWorkspace` under your user folder, **not the whole user folder**. Choose an absolute path to a dedicated empty/sample folder. Setup creates it only after review. File tools will access this folder and its allowed descendants. Never choose a folder full of private documents.
+- **Credential:** choose `store` to enter a hidden key and save it in **Windows Credential Manager** for later launches. Choose `session` for a key kept only in this setup process, usable if you start chat at the end. It is not exported to PowerShell or saved for tomorrow. There is no plaintext fallback if Credential Manager fails. On rerun, `keep` retains the existing credential (default when one exists); `store` explicitly replaces it; `remove` deletes it. Choosing `session` also removes an old saved key after review.
+- **Diagnostic logs:** first-run default **no**. Keep this off for the beginner path. Logs may contain conversation/tool data; they are not resumed conversation memory. Rerun preserves the previous preference when you press Enter.
+- **Stable copy:** choose **yes** if using a temporary extraction folder. The executable goes beside settings under `interactive\bin\agent-harness.exe`. A different existing executable is a conflict, never silently replaced; move/back up the old file explicitly before upgrading.
+- **User PATH:** optional, default no. Requires the stable executable. Only the current user's PATH is changed; existing entries are skipped and conflicting user-PATH installations are rejected. New terminals see the change. Machine PATH is untouched and elevation is not required. Review other installations yourself if command resolution is unexpected.
+- **Shortcut:** optional, default no. Requires the stable executable. Creates **Chat with Agent Harness.lnk** beside settings. It opens the console app with an absolute executable/settings path and the chosen working directory; no key appears in its arguments. Open it from that folder or pin it yourself.
+- **Review:** check the exact endpoint, model, workspace, credential action, log preference, and integration paths. Only answer **yes** to Apply if they are correct.
+- **Connection test:** optional and separate from offline configuration validation. Answering yes sends a small request (no workspace file contents) and **may incur API charges**. A successful offline check does not validate billing, key, model access, or network availability. A failed connection check leaves settings saved so you can rerun setup.
+- **Start chat:** choose yes. With session-only storage, this is how to use that key before it is discarded. Choose no to finish without a model request.
 
-```powershell
-$secureKey = Read-Host 'Paste your OpenAI API key (hidden)' -AsSecureString
-try {
-    $env:OPENAI_API_KEY = [System.Net.NetworkCredential]::new('', $secureKey).Password
-} finally {
-    $secureKey.Dispose()
-    Remove-Variable secureKey
-}
-$env:OPENAI_BASE_URL = 'https://api.openai.com/v1'
-$env:OPENAI_MODEL = 'gpt-4.1-mini'
-$env:AGENT_SUMMARY_MODEL = 'gpt-4.1-mini'
-$env:AGENT_RUN_LOGS_ENABLED = 'false'
-$env:VECTOR_STORE_PROVIDER = 'none'
-& $exe config check
-if ($LASTEXITCODE -ne 0) { throw 'Fix the config error before starting chat' }
-```
+**Billing/privacy:** API billing is separate from ChatGPT subscriptions. Set provider usage controls before real calls; budget alerts need not be hard caps. Prompts and tool/file contents are sent to your selected provider, including summaries when needed. Tool loops can make multiple billable requests. Hidden input avoids shell-history exposure, but keys still exist in process memory; Credential Manager does not defend against compromise of your Windows account/admins. Clear the clipboard after pasting and revoke exposed keys in the provider dashboard.
 
-Expected output starts with `config ok`. The next line includes `OPENAI_API_KEY=***`, `OPENAI_BASE_URL=https://api.openai.com/v1`, `OPENAI_MODEL=gpt-4.1-mini`, and `AGENT_RUN_LOGS_ENABLED=false`. The model names above are the code's current defaults, not a promise of the newest model or of access on your account. This check is offline: it validates local configuration, **not** the key, billing, network, or model availability.
+## 3. Try a conversation and sample file tools
 
-For `chat`, `ask`, and `config check`, configuration comes from **nonempty process environment values first**, then a `.env` in the current working directory, then optional built-in defaults. They do **not** read the background runtime's `config.yaml` or `config\secrets\env`. Do not run `init` to fix chat configuration. `--home`/`--instance` are not chat workspace selectors.
-
-The hidden prompt avoids putting the key in shell command history, but the application still needs plaintext in process memory/environment. This is not a secret vault and does not protect against compromise of your Windows account or administrators. Clear your clipboard after pasting a key; revoke it in the provider dashboard if exposed.
-
-## 4. Have a first conversation
-
-**Privacy before you send:** prompts and any file contents returned by tools are sent to the configured external model API (including summarization when needed). Use only the sample file. File path checks, blocked names, and log redaction are not perfect secret filtering or a complete security sandbox. Never put credentials or sensitive documents into this workspace. Logging is disabled above because default run logs can contain prompts, file contents, and answers; disabling logs does not prevent API transmission or terminal output.
-
-```powershell
-& $exe chat
-```
-
-Expected immediately: `You: `, with no welcome banner. Type a single line and press Enter:
+At `You:`, enter only the text after the label:
 
 ```text
-You: In two sentences, what can you help me do with this sample workspace?
+You: In two sentences, what can you help me do with a sample workspace?
 Agent: ...
 You: Explain that more simply.
-Agent: ...
 ```
 
-Type only the text after `You:`; the program prints the label itself. Answers vary, and the response is printed when the turn finishes rather than streamed token by token. The second message can refer to the first because this process retains conversation history.
+Answers vary. This chat keeps history in memory until exit, not across launches. Responses appear when the turn completes rather than streaming token by token.
 
-If you see `chat turn failed: ...`, the chat may return to `You:` instead of exiting. Use `/exit` before running PowerShell commands to fix the issue; troubleshooting is below.
+To try files, first exit with `/exit`. Create a non-sensitive `notes.txt` in the selected workspace using Notepad, containing:
 
-## 5. Ask it to use local file tools
+```text
+Project: Weekend garden
+TODO: Buy basil seeds
+TODO: Water the seedlings
+```
 
-At the same `You:` prompt, try these one at a time:
+Restart chat using the stable executable or shortcut. Then ask:
 
 ```text
 Use list_files to list this workspace. Do not run commands.
-Use read_file to read notes.txt, then tell me the project name.
-Use search_files to search for TODO in this workspace and list the two tasks.
+Use read_file to read notes.txt and tell me the project name.
+Use search_files to search for TODO and list the two tasks.
 ```
 
-Expected: the file listing includes `notes.txt`; the project is `Weekend garden`; the tasks are buying basil seeds and watering the seedlings. These are model-driven requests, so wording and tool choices can vary. If it guesses without reading, explicitly ask again to use the named tool. Optional diagnostics: leave chat with `/exit`, then run `& $exe chat --trace`; trace reports tool names and sizes without intentionally dumping full contents, while the normal answer can still quote your file.
+The built-ins are `echo`, `list_files`, `read_file`, `search_files`, and restricted `run_command`. No general file-edit, browser, or desktop-control tool is provided. File tools constrain paths, block selected sensitive names (including `.env`), and cap output, but are not perfect secret filtering or full OS isolation. Use only safe sample data.
 
-The built-ins are `echo`, `list_files`, `read_file`, `search_files`, and `run_command`. File tools constrain paths to the workspace, block selected sensitive names such as `.env`, and cap long output. Those safeguards do not classify all private content. There is no general file-edit, browser, or desktop-control tool in this CLI.
+**There is no human approval dialog for command calls.** Model-supplied `confirm:true` is not human approval. The enforced exact-command allowlist is `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`, with no shell and a timeout. These need external programs; PowerShell's `pwd` alias is not a `pwd` executable. `go test` executes repository code. Skip command examples on the beginner path.
 
-`run_command` accepts only the exact allowlist: `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`. It executes programs **without a shell**, so PowerShell's `pwd` alias does not supply a `pwd` executable on Windows. Git/Go commands need those programs installed; Git also needs a repository, which this new sample workspace is not. Skip command examples for this first conversation. Later, only in an intentionally chosen non-sensitive Git repository with Git installed, you could ask it to run `git status --short`.
+## 4. Return later or choose another project
 
-**There is no human approval dialog for command calls.** `confirm:true` is a field supplied by the model in its tool arguments, not proof that you reviewed/approved a command. The allowlist and timeout are the actual enforced command restrictions; this is not arbitrary shell access or OS isolation (for example, `go test` can execute repository code).
-
-## 6. Exit, try one-shot ask, and remove the key
-
-At `You:`, type:
-
-```text
-/exit
-```
-
-Expected: `Goodbye.` and your PowerShell prompt. `exit` and `quit` also work. If a network call hangs, Ctrl+C can terminate the process; restart when ready.
-
-For a separate single question, run this in PowerShell (it makes a billable API call):
+With Credential Manager storage, no environment block or key re-entry is needed. Open the shortcut or run:
 
 ```powershell
-& $exe ask 'Use read_file to read notes.txt and summarize its two TODO items.'
+& "$env:APPDATA\agent-harness\interactive\bin\agent-harness.exe" config check
+& "$env:APPDATA\agent-harness\interactive\bin\agent-harness.exe" chat
 ```
 
-Expected: a summary of the two sample tasks, then return to PowerShell, with no `You:` prompt. `ask` does not share the previous chat's history.
+These paths assume the wizard's default settings location and stable-copy choice. Without copying, run the executable from its retained extraction folder instead. With opt-in PATH, use `agent-harness chat` in a new terminal. `ask 'your question'` uses the same saved settings but starts a separate one-shot request.
 
-When finished:
+The CLI announces the selected workspace. **By default saved settings select the saved folder even when launched from another current directory.** To intentionally use your current project instead:
 
 ```powershell
+agent-harness chat --workspace current
+```
+
+Or use `--workspace saved` / `--workspace '<absolute directory>'`. The selected directory is both the file-tool sandbox and working directory. Manual `tool` debug commands still use the current directory and do not restore the saved workspace. `--home`/`--instance` are background-runtime options, not chat workspace selectors.
+
+`chat`, `ask`, and `config check` resolve **nonempty process environment > selected workspace `.env` > saved settings > built-in defaults**. For the key: **process environment > selected workspace `.env` > Credential Manager**. An explicit key skips Credential Manager reads. Existing environment/`.env` log or provider overrides still win; switching a provider does not automatically select a different key. Inspect safe `config check` output, never dump secrets. `--settings '<absolute JSON path>'` selects a separate interactive profile with its own credential reference. Linux keeps its environment/current-directory behavior unless an explicit settings path is supplied. No background YAML/private-env config is changed.
+
+Exit with `/exit`, `exit`, `quit`, or EOF. A new launch is a **new conversation**; persistent JSONL logs are diagnostics, not automatically restored memory.
+
+## Rerun, remove, or roll back
+
+Run `setup` again to review current defaults. Credential replacement/removal and optional integrations require another Apply confirmation. Answering no to optional integration prompts leaves already-installed integrations intact; use removal to undo them. The shortcut is regenerated only if unchanged/owned. An externally modified shortcut is retained for manual review. Settings/credential/integration writes are not a single transaction: a disk or integration error after Apply may leave some changes applied; rerun to inspect/retry, or remove them explicitly. Workspace creation may already have occurred. Nothing deletes workspace files.
+
+```powershell
+agent-harness setup --remove
+```
+
+This asks for confirmation, deletes this profile's saved credential, settings, unchanged owned shortcut, and owned user PATH entry. Use the retained executable's full path if PATH was never enabled. For custom profiles, supply the same `--settings` path. Removal retains workspace files and the copied executable; close sessions and delete that executable/bin folder yourself if no longer needed. Do not delete another runtime installation. Deleting a credential does **not** revoke the provider key: revoke it in the provider dashboard separately. Clear any process-environment keys and close processes that inherited them. If ownership metadata is damaged or a shortcut was modified, removal fails closed for manual inspection; remove only the displayed profile's integrations yourself.
+
+For rollback, retain a backup of the old executable and non-secret settings before an explicit upgrade; restore them manually with sessions closed. Credential replacement cannot recover a previous key—re-enter it or rotate it at the provider. Do not delete a workspace as an uninstall step.
+
+## Troubleshooting and advanced manual fallback
+
+- **Unknown `setup`:** this binary predates Step 22. Check `version` and the release notes; do not assume any Windows ZIP includes the wizard.
+- **No interactive terminal / hidden input unavailable:** run directly in PowerShell, not through a pipeline. Do not put the key in arguments to bypass this.
+- **Missing saved credential:** rerun setup with `store`, or use session-only entry and start chat during setup. Never paste keys into support messages.
+- **Config works but 401/403/404/429:** inspect key/model permissions, endpoint, billing/quota and rate limits at the provider. Stop repeated billable retries until resolved. Network errors require normal TLS/network troubleshooting, not disabling verification.
+- **Wrong files:** read the workspace announcement; use `--workspace current` deliberately, or rerun setup. A missing saved folder fails clearly rather than silently switching directories.
+- **Unexpected provider/logs:** nonempty inherited environment and the selected workspace's `.env` override saved settings. Inspect only redacted `config check` output.
+- **Chat turn failed:** use `/exit` before running PowerShell commands. Ctrl+C can stop a stuck process.
+
+Advanced/manual setup remains available without saving a credential. In a deliberately selected sample workspace, enter a process-only key with hidden input, then run the retained binary:
+
+```powershell
+$secureKey = Read-Host 'API key (hidden)' -AsSecureString
+try { $env:OPENAI_API_KEY=[System.Net.NetworkCredential]::new('', $secureKey).Password }
+finally { $secureKey.Dispose(); Remove-Variable secureKey }
+$env:OPENAI_BASE_URL = 'https://api.openai.com/v1'
+$env:OPENAI_MODEL = 'gpt-4.1-mini'
+$env:AGENT_RUN_LOGS_ENABLED = 'false'
+.\agent-harness.exe config check --workspace current
+.\agent-harness.exe chat --workspace current
 Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
 ```
 
-This removes the key from this PowerShell process, not from already-running child processes or the provider account. Close any other processes to which you passed it. Revoke/delete the key in the provider dashboard when no longer needed. No key file was created by this walkthrough.
+Adjust the executable path if it is not in that folder. This key is inherited by child processes, not saved in Credential Manager, and is not removed from already-running children by clearing PowerShell's environment. `.env` is also an advanced supported override, but is plaintext: protect its real Windows ACL and parent directory before entering credentials, never commit it, and remember a downloaded workspace has no repository `.gitignore`. Chat's `.env` loader does not perform the background daemon's ACL validation. Prefer Credential Manager for reusable keys.
 
-## 7. Come back tomorrow (fresh PowerShell window)
-
-Do not repeat the download or sample-file creation. Restore the executable/workspace paths and enter the key again:
-
-```powershell
-$exe = Join-Path $env:LOCALAPPDATA 'agent-harness\bin\agent-harness.exe'
-$workspace = Join-Path $env:LOCALAPPDATA 'agent-harness\workspaces\first-conversation'
-if (-not (Test-Path -LiteralPath $exe)) { throw 'Installed binary not found; check step 1' }
-if (-not (Test-Path -LiteralPath $workspace)) { throw 'Workspace not found; check step 2' }
-Set-Location -LiteralPath $workspace
-$secureKey = Read-Host 'Paste your OpenAI API key (hidden)' -AsSecureString
-try {
-    $env:OPENAI_API_KEY = [System.Net.NetworkCredential]::new('', $secureKey).Password
-} finally {
-    $secureKey.Dispose()
-    Remove-Variable secureKey
-}
-$env:OPENAI_BASE_URL = 'https://api.openai.com/v1'
-$env:OPENAI_MODEL = 'gpt-4.1-mini'
-$env:AGENT_SUMMARY_MODEL = 'gpt-4.1-mini'
-$env:AGENT_RUN_LOGS_ENABLED = 'false'
-$env:VECTOR_STORE_PROVIDER = 'none'
-& $exe config check
-if ($LASTEXITCODE -ne 0) { throw 'Fix the config error before starting chat' }
-& $exe chat
-```
-
-Expected: `config ok`, a redacted config summary, then `You: `. Ask it to read `notes.txt` again. **This is a new conversation, not a resumed session.** Files remain on disk, but chat history/summaries live only in memory. Even if you later enable JSONL logs, those logs are diagnostics, not automatically reloaded conversational memory. After `/exit`, remove `Env:OPENAI_API_KEY` again as in step 6.
-
-## Troubleshooting
-
-- **`& $exe` fails / executable not found:** restore `$exe` from step 7 and use `Test-Path -LiteralPath $exe`. Do not paste PowerShell commands at `You:`. Check that you downloaded/extracted the Windows amd64 ZIP.
-- **`config error: OPENAI_API_KEY is required`:** repeat the hidden-key prompt in this same PowerShell window. A key set in another window or daemon secret file does not configure this process.
-- **`config ok`, then status 401/403:** check the key and project/model permissions in the provider dashboard. Do not print the environment or paste the key into support messages.
-- **Status 429 / quota or billing error:** check API billing, credits, usage limits, and rate limits. Stop repeated retries until resolved; a ChatGPT subscription is separate.
-- **Model not found / status 404:** check `OPENAI_BASE_URL` in `config check` and confirm model availability with the provider. If selecting another supported tool-capable chat-completions model, set both `OPENAI_MODEL` and `AGENT_SUMMARY_MODEL` explicitly.
-- **Network/TLS error or long wait:** check connectivity, firewall, and organizational proxy policy. Do not disable TLS certificate checks. Ctrl+C can stop a stuck process.
-- **File not found / wrong folder:** leave chat, run `Get-Location` and `Get-ChildItem`, then `Set-Location -LiteralPath $workspace` and restart. An outside-workspace path is rejected; copy only a non-sensitive sample into the workspace instead.
-- **Unexpected settings:** inspect the safe `config check` output. Inherited environment values or a local `.env` can affect settings not explicitly set above. Never dump all environment variables or the contents of a secret file into diagnostics.
-- **Truncated output / context warning:** use small files and focused questions. Long conversations may be summarized; this does not preserve every detail or add durable memory.
-
-## Optional later: persistent credentials (not needed here)
-
-Session-only entry is the recommended first path. If you later choose `.env` persistence, remember that interactive chat reads it **only from its current working directory**, not an arbitrary external key-file path. Protect the parent folder and empty `.env` with a current-user private Windows ACL **before** entering credentials in a trusted editor; verify the actual file's ACL after saving. See the [runtime guide's ACL examples](windows-runtime.md#initialize-and-protect-the-instance-before-adding-credentials) for the principles, but apply them only to your deliberately chosen workspace/file: its daemon `config\secrets\env` is a different loader, not a chat key store. Chat's `.env` loader does not perform the daemon's ACL validation. Windows mode bits alone are not private ACLs.
-
-A downloaded-binary workspace has **no repository `.gitignore` by default**. If you later initialize Git, add `.env` to `.gitignore` before staging anything; an ignore rule does not protect already-tracked files, backups, cloud sync, other programs, or other users. File-tool blocking of `.env` is not encryption. To remove a persistent key, delete its local file, clear inherited process variables/close sessions, and revoke the provider key; deleting a file alone does not revoke it.
-
-For optional scheduled jobs and background startup after you are comfortable with interactive use, continue to the [Windows runtime guide](windows-runtime.md). That separate setup is not required to chat.
+Background scheduling is separate and optional: see the [Windows runtime guide](https://github.com/zachfire9/agent-harness/blob/main/docs/windows-runtime.md).
