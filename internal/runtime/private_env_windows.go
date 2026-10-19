@@ -11,7 +11,10 @@ import (
 // contents. No profile scripts, shell expansion of paths, or credential output.
 func checkPrivateEnvironmentFile(path string, _ os.FileInfo) error {
 	script := `$ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath $env:AGENT_HARNESS_ACL_PATH
+# The caller may be pwsh 7 or supply untrusted modules. Import only the child
+# Windows PowerShell installation's built-in module, never via PSModulePath.
+Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
+$acl = Microsoft.PowerShell.Security\Get-Acl -LiteralPath $env:AGENT_HARNESS_ACL_PATH
 $descriptor = [System.Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorBinaryForm(), 0)
 # A null/absent DACL grants unrestricted access. A present empty DACL denies
 # access instead; do not confuse its lack of ACEs with a null DACL.

@@ -1566,9 +1566,9 @@ Verification is isolated: temporary instance directories, fake model/token, and 
 
 ## Step 21 — Windows current-user background runtime
 
-- **Status:** Implemented locally; native Windows verification and PR pending
+- **Status:** Implemented; native Windows verification in progress
 - **Branch:** `step-21-windows-runtime`
-- **Pull Request:** TBD
+- **Pull Request:** [#43](https://github.com/zachfire9/agent-harness/pull/43)
 - **Concept:** Add a limited current-user at-login Task Scheduler adapter, without administrator access or a saved password. Reuse shared daemon/jobs/status; leave Linux/systemd unchanged.
 
 ### Implementation checklist
@@ -1581,7 +1581,7 @@ Verification is isolated: temporary instance directories, fake model/token, and 
 - [x] Native CLI/ACL/task smoke script and Ubuntu/Windows reusable CI gate before release publication.
 - [ ] Execute native Windows unit/vet and CLI/ACL smoke; record CI evidence.
 - [ ] Execute full native register/query/start/fresh heartbeat/stop/unregister lifecycle in an interactive session; record evidence. Session-0/token-unavailable output is failure, not E2E success.
-- [ ] Open implementation PR after review; merge/release/install require separate approval.
+- [x] Open implementation PR after review; merge/release/install require separate approval.
 
 ### Verification and limits
 
