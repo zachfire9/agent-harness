@@ -1456,7 +1456,7 @@ Live verification should start with manual `jobs run` before enabling the notifi
 
 - **Status:** Completed
 - **Branch:** `step-19-dev-testing-notification-primitives`
-- **Pull Request:** Pending creation; linked in this branch before review handoff.
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/41
 - **Concept:** Promote capabilities proven through local dev testing into reusable, deterministically tested application primitives without committing personal instance configuration.
 
 ### Implemented scope
