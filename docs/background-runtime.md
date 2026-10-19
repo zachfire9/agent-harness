@@ -308,6 +308,28 @@ jobs:
 
 The app code only knows generic context producer and renderer types; labels such as daily brief, birthday, or vocabulary live in instance config. `state/progress/<progress_key>.json` stores cursor metadata and item IDs, not document contents, prompts, generated message bodies, tokens, or API keys.
 
+### Date facts and configured translation requests
+
+`current_date` supplies an authoritative date derived from the job run timestamp. It accepts an optional IANA `timezone` (UTC by default) and a Go date-layout `format` (`Monday January 2, 2006` by default). Invalid timezones are rejected during config loading. A literal `\n` in the layout becomes a line break. Ordinary Go date formatting uses English weekday/month names; the runtime does not translate them or spell out numbers.
+
+For a scheduled notification, add date context and put translation instructions in the existing render prompt. This excerpt illustrates only the date portion; retain other context and prompt sections when adapting an existing job:
+
+```yaml
+context:
+  - id: today_date
+    type: current_date
+    timezone: "America/New_York"
+    format: "Monday, January 2, 2006"
+render:
+  type: llm_template
+  prompt: "The authoritative current date is {{ today_date }}. Use this date; do not infer today's date yourself. Write the date in Spanish, Italian, French, and German. Spell out the day number using natural conventions for each language. Put each language on its own line. Return only the notification body."
+  max_chars: 1200
+```
+
+The prompt stays on one physical line for compatibility with the runtime's YAML subset reader. Languages, wording, and output structure belong to instance config. Translation happens in the same single model call already used to render the notification, not in an additional request. Date/timezone resolution is deterministic; model-produced wording is not guaranteed to be identical or error-free. Tests can verify the exact date and instructions sent to a fake model without claiming to validate real translations.
+
+**Migrating temporary dev configurations:** custom placeholders such as `{weekday_es}`, `{month_it}`, `{day_fr}`, and `{day_de_ord}` are no longer expanded. Before deploying this version, replace localized layouts with a standard Go layout and move translation/spelled-out-number instructions into `render.prompt`. Also replace any old prompt instruction to copy pretranslated date lines verbatim. Unknown placeholder text remains literal; it is not a supported localization API. Private instance config and credentials do not belong in the repository.
+
 ### Pattern-delimited source cards
 
 Use `parser: heading_pattern` when a source has recognizable headings followed by plain text, bullets, or both. For example, this context entry can be added to a scheduled notification job (with a matching `{{ card }}` placeholder in its render prompt):

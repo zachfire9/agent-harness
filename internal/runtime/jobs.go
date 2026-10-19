@@ -438,52 +438,7 @@ func currentDateValue(cfg NotificationContextConfig, now time.Time) (string, err
 		format = "Monday January 2, 2006"
 	}
 	format = strings.ReplaceAll(format, `\n`, "\n")
-	format = localizeDateFormat(format, t)
 	return t.Format(format), nil
-}
-
-func localizeDateFormat(format string, t time.Time) string {
-	weekday := int(t.Weekday())
-	month := int(t.Month())
-	day := t.Day()
-	replacements := map[string]string{
-		"{weekday_es}": []string{"domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"}[weekday],
-		"{weekday_it}": []string{"domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"}[weekday],
-		"{weekday_fr}": []string{"dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"}[weekday],
-		"{weekday_de}": []string{"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"}[weekday],
-		"{month_es}":   []string{"", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"}[month],
-		"{month_it}":   []string{"", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"}[month],
-		"{month_fr}":   []string{"", "janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"}[month],
-		"{month_de}":   []string{"", "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"}[month],
-		"{day_es}":     localizedNumber(day, "es"),
-		"{day_it}":     localizedNumber(day, "it"),
-		"{day_fr}":     localizedNumber(day, "fr"),
-		"{day_de_ord}": germanOrdinal(day),
-	}
-	for placeholder, value := range replacements {
-		format = strings.ReplaceAll(format, placeholder, value)
-	}
-	return format
-}
-
-func localizedNumber(n int, lang string) string {
-	numbers := map[string][]string{
-		"es": {"", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve", "veinte", "veintiuno", "veintidós", "veintitrés", "veinticuatro", "veinticinco", "veintiséis", "veintisiete", "veintiocho", "veintinueve", "treinta", "treinta y uno"},
-		"it": {"", "uno", "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "undici", "dodici", "tredici", "quattordici", "quindici", "sedici", "diciassette", "diciotto", "diciannove", "venti", "ventuno", "ventidue", "ventitré", "ventiquattro", "venticinque", "ventisei", "ventisette", "ventotto", "ventinove", "trenta", "trentuno"},
-		"fr": {"", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf", "vingt", "vingt et un", "vingt-deux", "vingt-trois", "vingt-quatre", "vingt-cinq", "vingt-six", "vingt-sept", "vingt-huit", "vingt-neuf", "trente", "trente et un"},
-	}
-	if values, ok := numbers[lang]; ok && n > 0 && n < len(values) {
-		return values[n]
-	}
-	return fmt.Sprintf("%d", n)
-}
-
-func germanOrdinal(n int) string {
-	ordinals := []string{"", "erster", "zweiter", "dritter", "vierter", "fünfter", "sechster", "siebter", "achter", "neunter", "zehnter", "elfter", "zwölfter", "dreizehnter", "vierzehnter", "fünfzehnter", "sechzehnter", "siebzehnter", "achtzehnter", "neunzehnter", "zwanzigster", "einundzwanzigster", "zweiundzwanzigster", "dreiundzwanzigster", "vierundzwanzigster", "fünfundzwanzigster", "sechsundzwanzigster", "siebenundzwanzigster", "achtundzwanzigster", "neunundzwanzigster", "dreißigster", "einunddreißigster"}
-	if n > 0 && n < len(ordinals) {
-		return ordinals[n]
-	}
-	return fmt.Sprintf("%d.", n)
 }
 
 func daysUntilDateValue(cfg NotificationContextConfig, now time.Time) (string, error) {

@@ -1461,7 +1461,7 @@ Live verification should start with manual `jobs run` before enabling the notifi
 
 ### Implemented scope
 
-- Add deterministic `current_date` context with optional timezone, Go date layout, and opt-in localized weekday/month/day placeholders.
+- Add deterministic `current_date` context with optional timezone and standard Go date layout. Keep language selection, date translation, and spelling out numbers in the configured LLM render prompt, not app code.
 - Read rotating items from instance-relative `local_file` sources as well as configured Google Doc aliases.
 - Pass complete source-card headings and bodies into notification templates.
 - Add validated `heading_pattern` parsing for mixed plain-text/bulleted cards using a configured regular expression.
@@ -1471,10 +1471,11 @@ Live verification should start with manual `jobs run` before enabling the notifi
 ### Dev testing and verification
 
 - Run `go test ./...`, `go vet ./...`, and `git diff --check` before the PR handoff.
-- Cover fixed-time date rendering, invalid timezones, local sources, configurable card boundaries, malformed patterns, rotation independence/wraparound, and whitespace cleanup with deterministic tests.
+- Cover fixed-time date rendering, invalid timezones, exact authoritative date and configured translation instructions reaching the single model request, local sources, configurable card boundaries, malformed patterns, rotation independence/wraparound, and whitespace cleanup with deterministic tests. Model translation quality is not asserted by fake-client tests.
 - Local dev testing included controlled Gmail delivery/readback and recipient confirmation. Isolated test state kept formatting retries from consuming live rotation items.
 - Keep personal source documents, datasets, recipients, credentials, prompts, instance paths, and live cursor state outside the PR. Public examples use synthetic data only.
 - This step records dev-tested app capabilities, not a release: the running dev binary is temporary until a separately approved merge/release/install.
+- Before deploying, migrate any temporary language-placeholder date layouts and copy-verbatim translated-date instructions to a standard Go layout plus translation instructions in the private render prompt. The app-only PR does not edit live configuration or install a binary.
 
 ### Deferred
 
