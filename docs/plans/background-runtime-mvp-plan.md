@@ -1486,9 +1486,9 @@ HTML/multipart Gmail bodies remain Step 20. Do not expand this PR into rich-emai
 
 ## Step 20 — Rich Gmail notification bodies
 
-- **Status:** Planned
-- **Branch:** TBD
-- **Pull Request:** TBD
+- **Status:** Completed
+- **Branch:** `step-20-rich-gmail-bodies`
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/42
 - **Concept:** Make configured scheduled notifications nicer to read in Gmail without hardcoding daily-brief-specific sections in app code.
 
 ### Objective
@@ -1520,28 +1520,20 @@ This step should keep the app-level capability generic:
   - `text/plain` fallback;
   - `text/html` rich body.
 
-- Keep the first rich rendering path safe and small. Prefer one of these approaches over allowing arbitrary unsanitized model HTML:
-  - app-controlled conversion from plain structured lines/Markdown subset to safe HTML; or
-  - a tightly documented/rendered HTML mode with escaping/sanitization and a plain fallback.
+- Implement app-controlled conversion from textual content to escaped HTML: headings (`# ` through `### `), paragraphs/line breaks, and flat `- ` / `* ` bullets only. No inline formatting, raw HTML, links, images, scripts, or source-controlled attributes. Indentation is ignored; unrecognized syntax stays literal. The renderer is non-recursive and linear; it adds no dependency or model call. See the [precise format contract](../background-runtime.md#gmail-body-formats-step-20-unreleased).
 
-- Extend config without breaking existing plain-text notifier behavior. Possible shapes:
+- Extend config without breaking the legacy plain-text body/layout:
 
   ```yaml
   notifier:
     type: gmail
     gmail:
-      body_format: multipart # plain | html | multipart
+      body_format: multipart # plain | multipart; omitted means plain
   ```
 
-  or per-renderer if job-level output format is cleaner:
+  Reject `html`/HTML-only and unknown formats early. The plain alternative is deliberate for accessibility and compatibility. Keep the original textual markers in the fallback, normalizing line endings for MIME and replacing malformed UTF-8 with U+FFFD in both alternatives. Do not add model `output_format` or content-specific configuration.
 
-  ```yaml
-  render:
-    type: llm_template
-    output_format: html
-  ```
-
-- Update MIME generation so Gmail raw messages include correct content type headers, boundaries, and UTF-8 bodies.
+- Generate `multipart/alternative` with UTF-8 plain/HTML parts, quoted-printable transfer encodings, CRLF MIME framing, and MIME-encoded non-ASCII subjects. Validate header control characters in config and before sending.
 - Preserve secret-safe behavior: do not write generated email bodies, raw MIME payloads, access tokens, refresh tokens, or credential JSON to durable state/logs.
 - Update docs/config examples for a scheduled notification that uses `current_date` and rich Gmail output, while keeping user-specific source IDs redacted.
 
@@ -1561,17 +1553,14 @@ Add deterministic tests for:
 
 ```bash
 go test ./...
-agent-harness jobs run daily-brief --instance default --home ~/.local/share/agent-harness/instances/default
-agent-harness jobs list --instance default --home ~/.local/share/agent-harness/instances/default --json
-agent-harness status --instance default --home ~/.local/share/agent-harness/instances/default --json
+go vet ./...
+git diff --check
+go test ./internal/runtime -run 'TestGmail' -count=1
 ```
 
-Live verification should send a controlled test email and confirm in Gmail that:
+Verification is isolated: temporary instance directories, fake model/token, and a loopback HTTP Gmail endpoint. The delivery smoke test decodes actual MIME, verifies Unicode and escaped hostile HTML, exercises HTTP failure followed by success, checks one model call per run and advance-only-after-success, and checks persisted job/progress state for content/credential leaks. Existing Step 19 date tests remain in the full suite. No external email, live instance/config/service changes, or live progress consumption is part of this step.
 
-- the message renders as rich text;
-- the plain-text fallback is present in the raw MIME;
-- the daily brief can include the current date via `{{ today_date }}`;
-- the installed binary reports a released version after the PR is merged and published, not a local `dev` build.
+**Availability:** v0.1.4 supports Step 19. Multipart is implemented on this Step 20 branch and is not released yet. Keep the installed runtime on a released version while the branch is open. Merge, publish, and release/install are separate post-merge actions; do not install a local dev build for verification. Any later real Gmail visual check requires separate approval, explicit recipients, and an isolated instance with independent progress keys.
 
 ---
 

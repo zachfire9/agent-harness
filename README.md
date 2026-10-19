@@ -77,7 +77,7 @@ The `internal` packages are split so each concept can be tested in isolation. Th
 
 ## Configure a scheduled email
 
-For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. The full example requires Step 19 capabilities; it is not compatible with the v0.1.3 release. See the guide for availability details.
+For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. **v0.1.4 supports the Step 19 example** (`current_date`, local sources, and configurable card headings); v0.1.3 does not. Optional safe rich Gmail bodies (`notifier.gmail.body_format: multipart`) are implemented on the **Step 20 branch, not yet released**. Plain remains the default; see [body formats](docs/background-runtime.md#gmail-body-formats-step-20-unreleased) before opting in.
 
 ## Quick start
 

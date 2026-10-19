@@ -138,10 +138,11 @@ type GmailNotifierConfig struct {
 	From          string
 	To            []string
 	SubjectPrefix string
+	BodyFormat    string
 }
 
 func DefaultRuntimeConfig() RuntimeConfig {
-	return RuntimeConfig{Jobs: []JobConfig{{
+	return RuntimeConfig{Notifier: NotifierConfig{Gmail: GmailNotifierConfig{BodyFormat: "plain"}}, Jobs: []JobConfig{{
 		Name:     "heartbeat",
 		Type:     "heartbeat",
 		Enabled:  true,
@@ -167,6 +168,9 @@ func ReadRuntimeConfig(paths Paths) (RuntimeConfig, error) {
 	}
 	cfg.Google = googleConfig
 	cfg.Notifier = notifierConfig
+	if cfg.Notifier.Gmail.BodyFormat == "" {
+		cfg.Notifier.Gmail.BodyFormat = "plain"
+	}
 	cfg.LLMs = llmRegistry
 	cfg.Sources = sources
 	if sawJobs {
@@ -467,6 +471,8 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				}
 			case "subject_prefix":
 				notifier.Gmail.SubjectPrefix = value
+			case "body_format":
+				notifier.Gmail.BodyFormat = value
 			}
 			continue
 		}
@@ -900,6 +906,15 @@ func validateNotifierConfig(notifier NotifierConfig, google GoogleConfig) error 
 	case "", "file_outbox":
 		return nil
 	case "gmail":
+		if notifier.Gmail.BodyFormat != "" && notifier.Gmail.BodyFormat != "plain" && notifier.Gmail.BodyFormat != "multipart" {
+			return fmt.Errorf("gmail notifier body_format must be plain or multipart")
+		}
+		if err := validateGmailHeaderValues(notifier.Gmail.From, notifier.Gmail.SubjectPrefix); err != nil {
+			return err
+		}
+		if err := validateGmailHeaderValues(notifier.Gmail.To...); err != nil {
+			return err
+		}
 		if strings.TrimSpace(notifier.Gmail.From) == "" {
 			return fmt.Errorf("gmail notifier from is required")
 		}

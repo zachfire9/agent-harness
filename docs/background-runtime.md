@@ -311,6 +311,31 @@ jobs:
 
 The app code only knows generic context producer and renderer types; labels such as daily brief, birthday, or vocabulary live in instance config. `state/progress/<progress_key>.json` stores cursor metadata and item IDs, not document contents, prompts, generated message bodies, tokens, or API keys.
 
+### Gmail body formats (Step 20, unreleased)
+
+**Availability:** v0.1.4 includes Step 19 date/local-source/card parsing features. The `body_format` option below is implemented on `step-20-rich-gmail-bodies` and is **not yet in a release**. Do not add it to a v0.1.4 live instance expecting rich mail; older binaries may ignore unknown keys. Release installation remains a separate post-merge action.
+
+```yaml
+notifier:
+  type: gmail
+  gmail:
+    from: "agent@example.com"
+    to:
+      - "operator@example.com"
+    subject_prefix: "[agent-harness]"
+    body_format: multipart
+```
+
+- Omit `body_format` (or set `plain`) to retain the existing plain-text message layout and body bytes. `multipart` opts into `multipart/alternative`, with UTF-8 `text/plain` first and app-generated `text/html` second. Both parts use quoted-printable transfer encoding and MIME CRLF framing. The fallback retains textual content/markers, normalizing line endings and replacing malformed UTF-8 with U+FFFD in both alternatives (for example if the existing byte-based output cap splits a character). Valid UTF-8 content is preserved. Non-ASCII subjects use MIME encoded words; control characters in configured headers and job names are rejected with non-content errors.
+- Only `plain` and `multipart` are supported (case-sensitive). `html`/HTML-only and unknown values are rejected early. Requiring a plain alternative is deliberate for accessibility, compatibility, and inspection. This setting applies to Gmail notifications; it does not change `file_outbox` or the model/render schema.
+- HTML syntax is deliberately limited: after trimming surrounding whitespace on each line, `# `, `## `, or `### ` followed by nonempty text produce headings; consecutive `- ` or `* ` lines with nonempty text produce a flat unordered list. Blank lines close a paragraph/list. Other consecutive lines form a paragraph with `<br>` line breaks. Headings and list transitions also close the previous block. Ordinary text without markers is readable as paragraphs.
+- Everything else is **literal escaped text**, including raw HTML, Markdown bold, links, image syntax, code fences, numbered lists, and headings deeper than level three. Indentation is ignored, so indented bullets flatten rather than nest. No inline Markdown is interpreted. All source text is HTML-escaped, including text within headings and bullets. The app emits only a fixed document wrapper, headings, paragraphs, breaks, and list tags: no links, images, scripts, CSS, or source-controlled attributes. Email clients may independently auto-link visible text; the renderer does not generate anchors.
+- The renderer is a single non-recursive linear pass, not a general Markdown engine. It has no fetching, sanitization dependencies, or extra model call. Existing `render.max_chars` caps scheduled model output before delivery; MIME/HTML escaping can expand the wire size. Formatting is not a client-specific visual guarantee. Avoid tabs/indentation-dependent layouts.
+- Keep returning textual content once from the configured model prompt. Optionally request headings and flat bullets in that same single-line prompt; do not request HTML. Keep language, source selection, dates, and section wording in existing instance config. The `current_date` context below composes with this notifier without special rich-output logic.
+- Generated bodies and MIME stay in memory during Gmail delivery. Job/progress state stores metadata only; HTTP failure response bodies are not included in errors. `file_outbox`, if selected instead, intentionally writes message content locally and is not a secret-free output adapter.
+
+For isolated verification, run `go test ./internal/runtime -run 'TestGmail' -count=1`. The multipart delivery/progress smoke test uses a temporary instance, fake model/token, and loopback HTTP server, including a failed send and successful retry. It decodes actual MIME and checks persisted state for leaks without external credentials or mail. Do not point a development smoke test at a live instance, consume live rotation state, install a dev binary, or start a service. Any later controlled real send needs separate approval and an isolated instance after review/release.
+
 ### Date facts and configured translation requests
 
 `current_date` supplies an authoritative date derived from the job run timestamp. It accepts an optional IANA `timezone` (UTC by default) and a Go date-layout `format` (`Monday January 2, 2006` by default). Invalid timezones are rejected during config loading. A literal `\n` in the layout becomes a line break. Ordinary Go date formatting uses English weekday/month names; the runtime does not translate them or spell out numbers.
