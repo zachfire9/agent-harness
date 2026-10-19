@@ -1566,7 +1566,7 @@ Verification is isolated: temporary instance directories, fake model/token, and 
 
 ## Step 21 — Windows current-user background runtime
 
-- **Status:** Implemented; native Windows verification in progress
+- **Status:** Completed (implementation and native verification; merge/release/install pending)
 - **Branch:** `step-21-windows-runtime`
 - **Pull Request:** [#43](https://github.com/zachfire9/agent-harness/pull/43)
 - **Concept:** Add a limited current-user at-login Task Scheduler adapter, without administrator access or a saved password. Reuse shared daemon/jobs/status; leave Linux/systemd unchanged.
@@ -1579,8 +1579,8 @@ Verification is isolated: temporary instance directories, fake model/token, and 
 - [x] Portable path validation, Windows IANA timezone embedding, OS dispatch and status hint tests.
 - [x] Windows amd64 ZIP plus checksums and install/runtime documentation.
 - [x] Native CLI/ACL/task smoke script and Ubuntu/Windows reusable CI gate before release publication.
-- [ ] Execute native Windows unit/vet and CLI/ACL smoke; record CI evidence.
-- [ ] Execute full native register/query/start/fresh heartbeat/stop/unregister lifecycle in an interactive session; record evidence. Session-0/token-unavailable output is failure, not E2E success.
+- [x] Execute native Windows unit/vet and CLI/ACL smoke; [CI evidence](https://github.com/zachfire9/agent-harness/actions/runs/39276862161).
+- [x] Execute full native register/query/start/fresh heartbeat/stop/unregister lifecycle in an interactive session; the same CI run records all lifecycle PASS markers and cleanup. Session-0/token-unavailable output remains failure, not E2E success.
 - [x] Open implementation PR after review; merge/release/install require separate approval.
 
 ### Verification and limits

@@ -2,7 +2,7 @@
 
 Use this flow on machines that should run `agent-harness` without a source checkout or Go toolchain.
 
-The shell commands below are Linux-specific. For Windows amd64 (added by Step 21, native verification pending), use the [PowerShell download/checksum, stable binary install, private ACL, and Task Scheduler guide](windows-runtime.md). Windows support is not included in v0.1.5; select a later release that actually publishes a Windows asset. macOS remains pending Step 22.
+The shell commands below are Linux-specific. For Windows amd64 (added by Step 21, native CI verified; release pending), use the [PowerShell download/checksum, stable binary install, private ACL, and Task Scheduler guide](windows-runtime.md). Windows support is not included in v0.1.5; select a later release that actually publishes a Windows asset. macOS remains pending Step 22.
 
 Release artifacts are built under `dist/` by:
 

@@ -2,7 +2,7 @@
 
 Windows amd64 uses **Task Scheduler, current user, Interactive token, Limited privileges**. No administrator prompt, saved password, Windows Service, or machine-wide install is required. The task starts at that user's logon, not boot. It cannot run before login or after logout; locking the session is not logout. Linux `systemd --user` remains unchanged. macOS is a separate Step 22.
 
-**Availability/evidence:** this branch adds Windows support; v0.1.5 includes Step 20 rich Gmail bodies, not this adapter. Do not assume a Windows asset exists for an older release. Linux tests and Windows crosscompilation are not native Windows verification. Native CLI/ACL and task lifecycle evidence must come from the Windows CI smoke or an explicitly approved isolated Windows run. No native result is claimed by this document.
+**Availability/evidence:** this branch adds Windows support; v0.1.5 includes Step 20 rich Gmail bodies, not this adapter. Do not assume a Windows asset exists for an older release. Linux tests and Windows crosscompilation are not native Windows verification. Native Windows tests/vet, CLI/ACL smoke, and register/query/start/fresh heartbeat/stop/unregister lifecycle passed in [CI run 39276862161](https://github.com/zachfire9/agent-harness/actions/runs/39276862161). This is isolated CI evidence, not installation on your own machine or a published Windows release.
 
 ## Download, verify, and install
 

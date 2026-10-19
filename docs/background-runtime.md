@@ -1,6 +1,6 @@
 # Background Runtime
 
-`agent-harness` can run as a named background instance. This guide covers Linux `systemd --user`. Step 21 adds a separate [Windows Task Scheduler guide](windows-runtime.md) (current-user, Interactive, Limited, at-login; native verification pending). macOS is pending Step 22. Linux behavior is unchanged.
+`agent-harness` can run as a named background instance. This guide covers Linux `systemd --user`. Step 21 adds a separate [Windows Task Scheduler guide](windows-runtime.md) (current-user, Interactive, Limited, at-login; native CI verified, release pending). macOS is pending Step 22. Linux behavior is unchanged.
 
 For a task-oriented walkthrough, start with [Configure a daily brief email](configure-daily-brief.md). This document is the field-level runtime reference.
 
