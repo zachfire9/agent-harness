@@ -1593,8 +1593,8 @@ The adapter runs only while its user is logged in: no boot/before-login or after
 
 ## Step 22 — Guided Windows onboarding and first conversation
 
-- **Status:** Pending; planning only, implementation is a separate post-Step-21 PR
-- **Branch:** TBD (planned: `step-22-windows-onboarding`)
+- **Status:** Implementation present in working tree; Linux tests/vet and Windows crosscompilation verified locally. Native Windows onboarding execution/CI and publication remain pending; not release-verified.
+- **Branch:** `step-22-windows-onboarding`
 - **Pull Request:** TBD
 - **Concept:** Replace repeated PowerShell setup blocks with a first-run wizard and a repeatable chat entry point. Download/extract the Windows ZIP, run `agent-harness.exe setup`, answer a few prompts, then use `agent-harness chat` or a shortcut on later visits.
 
@@ -1611,17 +1611,22 @@ The adapter runs only while its user is logged in: no boot/before-login or after
 
 ### Implementation checklist / acceptance criteria
 
-- [ ] Add a testable interactive `setup` command with clear defaults, hidden secret input, cancellation/EOF handling, and helpful retry/error messages. Non-interactive invocations must fail clearly rather than hang.
-- [ ] Persist provider/model selectors, workspace, and onboarding preferences separately from secrets; use Windows Credential Manager for the saved API key and persist only its reference. Allow replacement/removal and explain provider-side revocation separately. Do not print secrets or pass them in process arguments, shortcuts, logs, or diagnostic output.
-- [ ] Wire `chat`, `ask`, and `config check` to the saved configuration/credential resolver. Define and document deterministic precedence with existing process environment and workspace `.env` overrides, preserving existing explicit configuration behavior. Keep background instance YAML/private-env handling separate; do not silently reconfigure daemon jobs.
-- [ ] Make selected-workspace behavior explicit: allow intentionally using a different current project directory without a silent directory switch; ensure shortcut working directory and any workspace-selection mechanism agree with file-tool sandboxing. Retain existing tool restrictions and explain that model-supplied `confirm:true` is not human approval.
-- [ ] Offer opt-in user PATH integration and a terminal chat shortcut; never modify machine PATH or require elevation. Use stable absolute executable paths, quote paths safely, and keep secrets out of shortcut arguments. Skip existing PATH entries and review conflicts rather than replacing another installation.
-- [ ] Make setup rerunnable without losing settings or overwriting credentials/workspaces unexpectedly. Document rollback/removal for settings, credential entries, optional shortcut, and user PATH entry; do not delete user workspace files.
-- [ ] Keep first-run logging off unless the user opts in; distinguish in-memory chat history from diagnostic logs and persistent settings.
-- [ ] Replace the beginner walkthrough's large setup blocks with the actual wizard flow once available, retaining manual setup as an advanced fallback. Link from README and packaged Windows instructions, and state the minimum supporting release.
-- [ ] Preserve Linux CLI behavior and the shared agent/tool loop. Keep platform-specific credential, path, and shortcut integration behind small testable boundaries.
+Implementation inventory (checked items below indicate implemented code/docs, not native acceptance): `internal/onboarding` supplies the wizard, non-secret settings, Credential Manager and optional owned integrations; the CLI resolver supplies saved/current/absolute workspace selection and environment > workspace `.env` > saved > built-in precedence. Removal preserves workspace files and copied binaries. Optional integration writes are not transactional; failure after Apply may leave settings saved and is documented for retry/removal. No live install, real credentials, background jobs, commits, tags, or publication were performed.
+
+- [x] Add a testable interactive `setup` command with clear defaults, hidden secret input, cancellation/EOF handling, and helpful retry/error messages. Non-interactive invocations must fail clearly rather than hang.
+- [x] Persist provider/model selectors, workspace, and onboarding preferences separately from secrets; use Windows Credential Manager for the saved API key and persist only its reference. Allow replacement/removal and explain provider-side revocation separately. Do not print secrets or pass them in process arguments, shortcuts, logs, or diagnostic output.
+- [x] Wire `chat`, `ask`, and `config check` to the saved configuration/credential resolver. Define and document deterministic precedence with existing process environment and workspace `.env` overrides, preserving existing explicit configuration behavior. Keep background instance YAML/private-env handling separate; do not silently reconfigure daemon jobs.
+- [x] Make selected-workspace behavior explicit: allow intentionally using a different current project directory without a silent directory switch; ensure shortcut working directory and any workspace-selection mechanism agree with file-tool sandboxing. Retain existing tool restrictions and explain that model-supplied `confirm:true` is not human approval.
+- [x] Offer opt-in user PATH integration and a terminal chat shortcut; never modify machine PATH or require elevation. Use stable absolute executable paths, quote paths safely, and keep secrets out of shortcut arguments. Skip existing PATH entries and review conflicts rather than replacing another installation.
+- [x] Make setup rerunnable without losing settings or overwriting credentials/workspaces unexpectedly. Document rollback/removal for settings, credential entries, optional shortcut, and user PATH entry; do not delete user workspace files.
+- [x] Keep first-run logging off unless the user opts in; distinguish in-memory chat history from diagnostic logs and persistent settings.
+- [x] Replace the beginner walkthrough's large setup blocks with the actual wizard flow once available, retaining manual setup as an advanced fallback. Link from README and packaged Windows instructions, and state the minimum supporting release (first Step-22-capable release, number not yet assigned/published).
+- [x] Preserve Linux CLI behavior and the shared agent/tool loop. Keep platform-specific credential, path, and shortcut integration behind small testable boundaries.
 
 ### Tests and verification
+
+Local evidence: `gofmt`; `go test ./... -count=1`; `go test -race ./... -count=1`; `go vet ./...`; `GOOS=windows GOARCH=amd64 go test -exec=true ./...` (compile only, NOT native execution); Windows-target `go vet`; `git diff --check`. Completion pass observed behavioral RED then GREEN for preserving rerun logging and hidden-prompt cancellation, and source-contract RED/GREEN for packaging/CI. Other pre-existing feature tests are regression coverage here, not a claim of freshly observed RED. `scripts/test-windows-onboarding.ps1` drives the extracted binary through the opt-in ConPTY test with a unique fake credential, loopback provider, Unicode/spaced temporary workspace and owned shortcut, fresh-process config/chat, rerun, and removal; cleanup runs even on failure. CI adds this gate before the existing strict runtime/task gate; release still depends on the reusable verification workflow. Native PowerShell/ConPTY/Credential Manager/shortcut execution has NOT run on this Linux host.
+Packaging evidence: an isolated source copy ran `scripts/build-release.sh step22-verification`; Linux amd64/arm64 and Windows amd64 artifacts built, all three checksum entries verified, Windows ZIP contents included `FIRST-CONVERSATION.md`, and the extracted Linux binary reported the injected version. Original checkout `dist/` files were left unchanged. The native smoke intentionally does not change user PATH; PATH behavior uses deterministic fake-runner tests. Real provider calls remain optional manual consent only.
 
 - [ ] Use RED/GREEN tests for wizard input/defaults/cancel/non-TTY behavior, saved-config round trips and precedence, fake credential-store success/failure/removal, secret-safe diagnostics, and idempotent setup with paths containing spaces/non-ASCII characters.
 - [ ] Test workspace selection and shortcut/user-PATH generation, including conflicts and cleanup, without altering real developer settings. No test may register background jobs or use real API keys by default.

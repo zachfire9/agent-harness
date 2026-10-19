@@ -2,7 +2,7 @@
 
 Use this flow on machines that should run `agent-harness` without a source checkout or Go toolchain.
 
-The shell commands below are Linux-specific. For Windows amd64 (added by Step 21, native CI verified; release pending), use the [PowerShell download/checksum, stable binary install, private ACL, and Task Scheduler guide](windows-runtime.md). Windows support is not included in v0.1.5; select a later release that actually publishes a Windows asset. Guided Windows onboarding is planned as Step 22; macOS remains pending Step 23.
+The shell commands below are Linux-specific. For Windows amd64 (added by Step 21, native CI verified; release pending), use the [PowerShell download/checksum, stable binary install, private ACL, and Task Scheduler guide](https://github.com/zachfire9/agent-harness/blob/main/docs/windows-runtime.md). Windows support is not included in v0.1.5; select a later release that actually publishes a Windows asset. Guided Windows onboarding is implemented in the Step 22 branch, with native verification and a supporting release pending; macOS remains pending Step 23. For interactive use (no daemon), follow [Your first Windows conversation](https://github.com/zachfire9/agent-harness/blob/main/docs/windows-first-conversation.md): verify/extract a Step-22-capable ZIP, run `agent-harness.exe setup`, then `chat`. No Go, Git, administrator privileges, or installer is required. The minimum supporting release is the first whose notes explicitly include Step 22; no numbered release is claimed yet.
 
 Release artifacts are built under `dist/` by:
 
@@ -60,7 +60,7 @@ agent-harness
 INSTALL.md
 ```
 
-The Windows ZIP contains `agent-harness.exe`, `INSTALL.md`, and `WINDOWS.md`; it is included in the same `checksums.txt`. The target does not need Go or Python. Building ZIPs on the release host requires Python 3 in addition to Go and the existing Unix tools.
+The Windows ZIP contains `agent-harness.exe`, `INSTALL.md`, `WINDOWS.md` (background runtime), and `FIRST-CONVERSATION.md` (guided interactive setup); it is included in the same `checksums.txt`. The target does not need Go or Python. Building ZIPs on the release host requires Python 3 in addition to Go and the existing Unix tools.
 
 Checksums are written to:
 
@@ -153,7 +153,7 @@ git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```
 
-The release workflow first requires the reusable native Ubuntu/Windows test/vet workflow, including the isolated Windows CLI/ACL and Task Scheduler lifecycle smoke. A hosted runner lacking an Interactive token fails this gate; it must not publish Windows artifacts as verified. After that gate, it builds Linux `amd64`/`arm64` tarballs and the Windows `amd64` ZIP with `scripts/build-release.sh`, verifies `dist/checksums.txt`, and publishes these GitHub Release assets:
+The release workflow first requires the reusable native Ubuntu/Windows test/vet workflow, including the extracted-binary onboarding console/credential/rerun/removal smoke and the isolated Windows CLI/ACL and Task Scheduler lifecycle smoke. A hosted runner lacking an Interactive token fails this gate; it must not publish Windows artifacts as verified. After that gate, it builds Linux `amd64`/`arm64` tarballs and the Windows `amd64` ZIP with `scripts/build-release.sh`, verifies `dist/checksums.txt`, and publishes these GitHub Release assets:
 
 ```text
 agent-harness_${VERSION}_linux_amd64.tar.gz

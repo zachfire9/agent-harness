@@ -24,6 +24,10 @@ jobs:
           cache: true
       - run: go test ./... -count=1
       - run: go vet ./...
+      - name: Native Windows extracted-binary onboarding smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-windows-onboarding.ps1
       - name: Native Windows isolated runtime and task smoke
         if: runner.os == 'Windows'
         shell: pwsh

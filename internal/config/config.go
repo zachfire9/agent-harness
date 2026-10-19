@@ -41,7 +41,26 @@ type Config struct {
 // local .env file in the current working directory. Process environment
 // variables take precedence over values in .env.
 func Load() (Config, error) {
-	dotEnv := loadDotEnv(".env")
+	return LoadInteractive(".env", nil, nil)
+}
+
+// LoadInteractive resolves process environment > selected workspace .env > saved
+// nonsecret defaults > built-ins. The credential reader is lazy and never logged.
+func LoadInteractive(dotEnvPath string, defaults map[string]string, credential func() (string, error)) (Config, error) {
+	dotEnv := make(map[string]string)
+	for k, v := range defaults {
+		dotEnv[k] = v
+	}
+	for k, v := range loadDotEnv(dotEnvPath) {
+		dotEnv[k] = v
+	}
+	if configValue("OPENAI_API_KEY", dotEnv) == "" && credential != nil {
+		key, err := credential()
+		if err != nil {
+			return Config{}, errors.New("saved credential unavailable; rerun setup or supply OPENAI_API_KEY")
+		}
+		dotEnv["OPENAI_API_KEY"] = key
+	}
 
 	apiKey := configValue("OPENAI_API_KEY", dotEnv)
 	if apiKey == "" {

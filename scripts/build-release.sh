@@ -49,11 +49,12 @@ for target in "${targets[@]}"; do
   cp "${ROOT_DIR}/docs/install-release.md" "${work_dir}/INSTALL.md"
   if [[ "${goos}" == "windows" ]]; then
     cp "${ROOT_DIR}/docs/windows-runtime.md" "${work_dir}/WINDOWS.md"
+    cp "${ROOT_DIR}/docs/windows-first-conversation.md" "${work_dir}/FIRST-CONVERSATION.md"
     python3 - "${work_dir}" "${archive}" <<'PY'
 import pathlib, sys, zipfile
 root, archive = pathlib.Path(sys.argv[1]), sys.argv[2]
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
-    for name in ('agent-harness.exe', 'INSTALL.md', 'WINDOWS.md'):
+    for name in ('agent-harness.exe', 'INSTALL.md', 'WINDOWS.md', 'FIRST-CONVERSATION.md'):
         output.write(root / name, name)
 PY
   else

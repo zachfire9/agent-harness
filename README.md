@@ -6,7 +6,7 @@ The goal of this repo is to make each agent concept understandable through small
 
 ## Start here on Windows
 
-**[Your first Windows conversation](docs/windows-first-conversation.md)** walks from a verified binary download to a session-only API key, config check, interactive chat, and safe sample-file tools—no Go, Git, daemon, or scheduled task needed. For optional background jobs instead, see the [Windows runtime guide](docs/windows-runtime.md).
+**[Your first Windows conversation](docs/windows-first-conversation.md)** walks from a verified Windows ZIP to `agent-harness.exe setup`, hidden key entry (Credential Manager or session-only), a dedicated workspace, and chat—no Go, Git, daemon, or scheduled task needed. The ZIP includes this guide as `FIRST-CONVERSATION.md`. Step 22 is implemented in the working branch, with native Windows verification and a supporting release still pending; v0.1.5 and Step-21-only binaries do not include `setup`. For optional background jobs instead, see the [Windows runtime guide](docs/windows-runtime.md).
 
 ## What this project demonstrates
 
@@ -83,7 +83,7 @@ The `internal` packages are split so each concept can be tested in isolation. Th
 
 For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. **v0.1.4 supports the Step 19 example** (`current_date`, local sources, and configurable card headings); v0.1.3 does not. Optional safe rich Gmail bodies (`notifier.gmail.body_format: multipart`) are available in **v0.1.5**. Plain remains the default; see [body formats](docs/configure-daily-brief.md#optional-rich-gmail-bodies-step-20-v015).
 
-Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification passed in the isolated CI run linked in that guide; a published Windows release is still pending, and v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. Guided Windows onboarding is the next planned Step 22; macOS/launchd follows as Step 23.
+Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification passed in the isolated CI run linked in that guide; a published Windows release is still pending, and v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. Guided Windows onboarding is implemented as Step 22 in the working branch (native verification/release pending); macOS/launchd follows as Step 23.
 
 ## Quick start
 
@@ -108,6 +108,8 @@ go test ./...
 ## Configuration
 
 The app loads config from:
+
+On Windows with Step 22 saved onboarding settings, `chat`, `ask`, and `config check` instead resolve nonempty process environment > selected workspace `.env` > saved preferences > built-ins; the key falls back to Credential Manager. The saved workspace is announced and selected by default; `--workspace current` deliberately uses the current project. See the [wizard guide](docs/windows-first-conversation.md#4-return-later-or-choose-another-project) for custom profiles, removal, logging, and precedence. Background instance YAML/private-env remains separate. Without saved onboarding (including normal Linux use), the original order below applies.
 
 1. Process environment variables, when they are set.
 2. A local `.env` file in the current working directory.
@@ -152,7 +154,7 @@ AGENT_RUN_LOG_DIR=.agent-harness/runs
 VECTOR_STORE_PROVIDER=none
 ```
 
-In this source checkout, `.env` is listed in `.gitignore` to prevent accidental staging of untracked keys; this is not encryption or protection for already-tracked files. A downloaded-binary workspace does not inherit that ignore rule. `.env.example` contains placeholders only. For a session-only key without a secret file, use the [Windows walkthrough](docs/windows-first-conversation.md#3-add-a-session-only-api-key-and-check-configuration).
+In this source checkout, `.env` is listed in `.gitignore` to prevent accidental staging of untracked keys; this is not encryption or protection for already-tracked files. A downloaded-binary workspace does not inherit that ignore rule. `.env.example` contains placeholders only. For hidden entry without a plaintext secret file, use the [Windows wizard walkthrough](docs/windows-first-conversation.md#2-answer-the-wizard).
 
 You can also set values directly in PowerShell instead of using `.env`:
 
