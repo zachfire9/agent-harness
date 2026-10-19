@@ -5,7 +5,7 @@ This walkthrough assembles a generic `scheduled_notification`: resolve date/coun
 ## 1. Prerequisites and version
 
 - Linux with a working `systemd --user` session for unattended operation. Foreground inspection/testing does not require systemd.
-- A binary containing **Step 19 / PR [#41](https://github.com/zachfire9/agent-harness/pull/41)**. The complete example uses `current_date`, `local_file`, and `heading_pattern`; **v0.1.3 does not support the full example**. Until a release containing these changes exists, use a reviewed build of that branch for development. No minimum released version is assigned yet; do not assume an arbitrary “latest” download contains it.
+- **v0.1.4 or a later release containing Step 19 / PR [#41](https://github.com/zachfire9/agent-harness/pull/41)**. The complete example uses `current_date`, `local_file`, and `heading_pattern`; **v0.1.3 does not support the full example**. Optional multipart Gmail bodies are implemented on the **Step 20 branch, not yet released**, and are not available in v0.1.4. Keep the released binary for normal operation while that step is under review.
 - A separately billed model-provider API key and an allowed model. The example uses OpenAI; see [provider configuration](background-runtime.md#ai-email-jobs) for alternatives.
 - A Google account with Gmail, a Google Cloud project with Gmail API and Google Docs API enabled, an OAuth consent configuration, and a **Desktop app** OAuth client. For an external app in Testing, add the signing-in account as a test user. Google testing-mode grants may expire and require reauthorization.
 - One Google Doc readable by that account. Never commit its real ID or your instance configuration.
@@ -139,7 +139,15 @@ jobs:
 - **Paths:** local source paths are relative to the instance home, not the shell's working directory. Do not use absolute paths or `../`.
 - **Rotation:** assign a unique stable `progress_key` to every independently rotating section. Each wraps at its own end; restart does not reset it. The active item-ID cycle snapshot refreshes at cycle boundaries. Do not edit/delete live progress files for ordinary formatting tests.
 - **Templates:** use exact `{{ context_id }}` placeholders, matching each context `id`. Single braces are not prompt substitutions. Review output for accidentally unexpanded placeholders.
-- **Size/format:** `max_chars` is an output cap, not a guarantee of complete sections; allow enough room. Gmail is plain text here; Markdown is not rich formatting. HTML/multipart support remains planned.
+- **Size/format:** `max_chars` is an output cap, not a guarantee of complete sections; allow enough room. This complete example uses default plain Gmail output and works with v0.1.4. Markdown markers remain literal in plain mode.
+
+### Optional rich Gmail bodies (Step 20 branch only, unreleased)
+
+Do not change a live v0.1.4 instance for this development feature. On a reviewed Step 20 build in an isolated instance, add `body_format: multipart` at the same indentation as `subject_prefix` under `notifier.gmail` (after the `to` list). Omit it or use `plain` for legacy behavior. Only `plain` and `multipart` are accepted, not `html`: rich messages deliberately include a plain fallback rather than HTML-only mail.
+
+Keep the existing single-line `render.prompt` and content contexts, including `today_date`. If desired, ask that same model request to use `# ` / `## ` / `### ` headings, blank-line-separated paragraphs, and flat `- ` / `* ` bullets. The app converts this small subset into HTML and escapes all content; ordinary unmarked text works too. Bold, links, images, and raw HTML are not interpreted. No additional model call or language-specific renderer is involved. The plain part retains the textual markers; only line endings are normalized for MIME. See the [precise renderer/MIME contract](background-runtime.md#gmail-body-formats-step-20-unreleased).
+
+For branch verification, use the fake-model/loopback Gmail test `go test ./internal/runtime -run TestGmailMultipartDeliveryProgressAndSafeState -count=1` from the checkout, not a live manual `jobs run`. It uses temporary state and verifies failure/retry without sending mail or consuming real rotation items. Release/install remains a separate post-merge step; a later real-mail check requires separate approval and an isolated instance.
 
 ## 4. Add credentials without putting them in YAML
 
@@ -290,7 +298,7 @@ Do not reset progress to change wording, languages, layout, or delivery time. Be
 
 ## Troubleshooting
 
-- **Config error / omitted sections:** use a Step 19-capable binary; preserve supported YAML indentation/list style and single-line prompts. Check context IDs and double-brace substitutions. The full example is not v0.1.3-compatible.
+- **Config error / omitted sections:** use v0.1.4 or later for the Step 19 example; preserve supported YAML indentation/list style and single-line prompts. Check context IDs and double-brace substitutions. The full example is not v0.1.3-compatible. `body_format: multipart` additionally needs the unreleased Step 20 implementation; v0.1.4 does not render rich mail.
 - **Missing key in manual run:** export the configured key name in the current shell. The service's secret env file is not automatically sourced by CLI commands.
 - **Missing key only in daemon:** check the instance's `config/secrets/env`, variable name, permissions, and restart the service; a key exported in your terminal does not configure the service.
 - **Google disconnected / scope error:** `auth start` only prints a handoff. Complete consent, check the saved scopes with `auth status`, enable the APIs, and reauthorize expired/revoked testing grants. Do not broaden to full Gmail/Drive access as a workaround.

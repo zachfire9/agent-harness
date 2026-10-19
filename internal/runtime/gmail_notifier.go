@@ -6,8 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net/http"
 	"net/mail"
+	"net/textproto"
 	"strings"
 	"time"
 )
@@ -32,6 +36,12 @@ type googleAccessTokenFile struct {
 
 func (n gmailNotifier) Send(ctx context.Context, message Message) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := validateNotifierConfig(NotifierConfig{Type: "gmail", Gmail: n.config}, n.google); err != nil {
+		return err
+	}
+	if err := validateGmailHeaderValues(message.Job); err != nil {
 		return err
 	}
 	client := n.client
@@ -84,16 +94,50 @@ func tokenHasScope(scopeText string, required string) bool {
 	return false
 }
 
+func validateGmailHeaderValues(values ...string) error {
+	for _, value := range values {
+		for _, char := range value {
+			if char < 32 || char == 127 || char == '\u0085' || char == '\u2028' || char == '\u2029' {
+				return fmt.Errorf("gmail notifier header contains forbidden control characters")
+			}
+		}
+	}
+	return nil
+}
+
 func encodeGmailRawMessage(config GmailNotifierConfig, message Message) string {
 	subject := "agent-harness notification"
 	if strings.TrimSpace(config.SubjectPrefix) != "" {
 		subject = strings.TrimSpace(config.SubjectPrefix) + " " + message.Job
 	}
+	subject = mime.QEncoding.Encode("UTF-8", subject)
 	headers := []string{
 		"From: " + (&mail.Address{Address: config.From}).String(),
 		"To: " + strings.Join(config.To, ", "),
 		"Subject: " + subject,
 		"Content-Type: text/plain; charset=UTF-8",
+	}
+	if config.BodyFormat == "multipart" {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		// The existing job byte cap can split a UTF-8 sequence. Repair malformed
+		// text for both rich alternatives without changing legacy plain bytes.
+		textBody := strings.ToValidUTF8(message.Body, "\uFFFD")
+		for i, text := range []string{textBody, renderGmailHTML(textBody)} {
+			mediaType := []string{"text/plain", "text/html"}[i]
+			part, _ := writer.CreatePart(textproto.MIMEHeader{
+				"Content-Type":              {mediaType + "; charset=UTF-8"},
+				"Content-Transfer-Encoding": {"quoted-printable"},
+			})
+			// These writers only target an in-memory bytes.Buffer: writes cannot fail.
+			encoded := quotedprintable.NewWriter(part)
+			_, _ = encoded.Write([]byte(normalizeGmailNewlines(text)))
+			_ = encoded.Close()
+		}
+		_ = writer.Close()
+		headers = append(headers[:3], "MIME-Version: 1.0", "Content-Type: "+mime.FormatMediaType("multipart/alternative", map[string]string{"boundary": writer.Boundary()}))
+		raw := strings.Join(headers, "\r\n") + "\r\n\r\n" + body.String()
+		return base64.RawURLEncoding.EncodeToString([]byte(raw))
 	}
 	raw := strings.Join(headers, "\r\n") + "\r\n\r\n" + message.Body + "\r\n"
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
