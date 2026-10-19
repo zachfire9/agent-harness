@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -15,6 +16,7 @@ import (
 const (
 	ProgressParserNonEmptyLines      = "non_empty_lines"
 	ProgressParserHeadingWithBullets = "heading_with_bullets"
+	ProgressParserHeadingPattern     = "heading_pattern"
 	ProgressStrategyRoundRobin       = "round_robin"
 )
 
@@ -56,9 +58,11 @@ type ProgressState struct {
 type ProgressSelectionRequest struct {
 	Key         string
 	SourceAlias string
-	Parser      string
-	Items       []ProgressItem
-	Now         time.Time
+	// SourceType scopes legacy Google Doc alias compatibility to typed requests.
+	SourceType string
+	Parser     string
+	Items      []ProgressItem
+	Now        time.Time
 }
 
 type ProgressSelection struct {
@@ -67,7 +71,19 @@ type ProgressSelection struct {
 }
 
 func ParseProgressItems(parser string, text string) ([]ProgressItem, error) {
+	return ParseProgressItemsWithHeadingPattern(parser, text, "")
+}
+
+// ParseProgressItemsWithHeadingPattern parses source text using a configurable
+// heading boundary. The pattern is required only for the heading_pattern parser.
+func ParseProgressItemsWithHeadingPattern(parser, text, headingPattern string) ([]ProgressItem, error) {
 	switch parser {
+	case ProgressParserHeadingPattern:
+		pattern, err := compileProgressHeadingPattern(headingPattern)
+		if err != nil {
+			return nil, err
+		}
+		return parseHeadingPatternItems(text, pattern), nil
 	case ProgressParserNonEmptyLines:
 		return parseNonEmptyLineItems(text), nil
 	case ProgressParserHeadingWithBullets:
@@ -75,6 +91,55 @@ func ParseProgressItems(parser string, text string) ([]ProgressItem, error) {
 	default:
 		return nil, fmt.Errorf("unknown progress parser %q", parser)
 	}
+}
+
+func compileProgressHeadingPattern(value string) (*regexp.Regexp, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, fmt.Errorf("heading_pattern is required")
+	}
+	pattern, err := regexp.Compile(value)
+	if err != nil {
+		return nil, fmt.Errorf("heading_pattern must be a valid regular expression")
+	}
+	if pattern.MatchString("") {
+		return nil, fmt.Errorf("heading_pattern must not match empty text")
+	}
+	return pattern, nil
+}
+
+func parseHeadingPatternItems(text string, pattern *regexp.Regexp) []ProgressItem {
+	var items []ProgressItem
+	seen := map[string]int{}
+	flush := func() {
+		if len(items) > 0 {
+			item := &items[len(items)-1]
+			item.ID = uniqueProgressID(item.Title, item.Body, seen)
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if pattern.MatchString(line) {
+			flush()
+			items = append(items, ProgressItem{Title: line})
+			continue
+		}
+		if len(items) == 0 {
+			continue
+		}
+		if body, ok := trimBulletPrefix(line); ok {
+			line = body
+		}
+		// A whitespace-only bullet loses its trailing space during trimming.
+		if line != "" && line != "-" && line != "*" && line != "•" {
+			item := &items[len(items)-1]
+			item.Body = append(item.Body, line)
+		}
+	}
+	flush()
+	return items
 }
 
 func parseNonEmptyLineItems(text string) []ProgressItem {
@@ -236,10 +301,26 @@ func shouldRefreshProgressSnapshot(state ProgressState, req ProgressSelectionReq
 	if state.Snapshot.Cycle != state.Cursor.Cycle {
 		return true
 	}
-	if state.Snapshot.Parser != req.Parser || state.Snapshot.SourceAlias != req.SourceAlias {
+	if state.Snapshot.Parser != req.Parser || !progressSourceMatches(state.Snapshot.SourceAlias, req) {
 		return true
 	}
 	return false
+}
+
+func progressSourceMatches(stored string, req ProgressSelectionRequest) bool {
+	if stored == req.SourceAlias {
+		return true
+	}
+	// Before typed notification sources, Google Doc snapshots stored raw aliases.
+	// Accept only that specific legacy representation, never strip arbitrary
+	// prefixes or reinterpret an existing typed source as a raw alias.
+	if req.SourceType != "google_doc" || !strings.HasPrefix(req.SourceAlias, "google_doc:") {
+		return false
+	}
+	if strings.HasPrefix(stored, "google_doc:") || strings.HasPrefix(stored, "local_file:") {
+		return false
+	}
+	return stored == strings.TrimPrefix(req.SourceAlias, "google_doc:")
 }
 
 func MarkProgressItemCompleted(paths Paths, key string, itemID string, now time.Time) error {

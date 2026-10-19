@@ -1452,6 +1452,129 @@ Live verification should start with manual `jobs run` before enabling the notifi
 
 ---
 
+## Step 19 — Dev testing and reusable notification primitives
+
+- **Status:** Completed
+- **Branch:** `step-19-dev-testing-notification-primitives`
+- **Pull Request:** https://github.com/zachfire9/agent-harness/pull/41
+- **Concept:** Promote capabilities proven through local dev testing into reusable, deterministically tested application primitives without committing personal instance configuration.
+
+### Implemented scope
+
+- Add deterministic `current_date` context with optional timezone and standard Go date layout. Keep language selection, date translation, and spelling out numbers in the configured LLM render prompt, not app code.
+- Read rotating items from instance-relative `local_file` sources as well as configured Google Doc aliases.
+- Pass complete source-card headings and bodies into notification templates.
+- Add validated `heading_pattern` parsing for mixed plain-text/bulleted cards using a configured regular expression.
+- Strip trailing per-line whitespace from generated plain-text notifications.
+- Document an end-to-end [daily brief setup walkthrough](../configure-daily-brief.md), with a complete synthetic configuration, OAuth handoff/setup, manual-versus-service environments, isolated testing, and service verification.
+- Preserve independent rotation keys and advancement only after successful delivery.
+
+### Dev testing and verification
+
+- Run `go test ./...`, `go vet ./...`, and `git diff --check` before the PR handoff.
+- Cover fixed-time date rendering, invalid timezones, exact authoritative date and configured translation instructions reaching the single model request, local sources, configurable card boundaries, malformed patterns, rotation independence/wraparound, and whitespace cleanup with deterministic tests. Model translation quality is not asserted by fake-client tests.
+- Local dev testing included controlled Gmail delivery/readback and recipient confirmation. Isolated test state kept formatting retries from consuming live rotation items.
+- Keep personal source documents, datasets, recipients, credentials, prompts, instance paths, and live cursor state outside the PR. Public examples use synthetic data only.
+- This step records dev-tested app capabilities, not a release: the running dev binary is temporary until a separately approved merge/release/install.
+- Before deploying, migrate any temporary language-placeholder date layouts and copy-verbatim translated-date instructions to a standard Go layout plus translation instructions in the private render prompt. The app-only PR does not edit live configuration or install a binary.
+
+### Deferred
+
+HTML/multipart Gmail bodies remain Step 20. Do not expand this PR into rich-email rendering, new delivery integrations, or personal content configuration.
+
+---
+
+## Step 20 — Rich Gmail notification bodies
+
+- **Status:** Planned
+- **Branch:** TBD
+- **Pull Request:** TBD
+- **Concept:** Make configured scheduled notifications nicer to read in Gmail without hardcoding daily-brief-specific sections in app code.
+
+### Objective
+
+Add generic rich email support for Gmail notifications, building on the deterministic `current_date` context producer completed in Step 19.
+
+This step should keep the app-level capability generic:
+
+- Gmail notifications can send safe rich text when configured.
+- Plain-text fallback still exists for accessibility and mail clients that do not render HTML.
+- Scheduled notification prompts can receive today’s date as a normal named context value.
+- Daily brief wording, section names, translation languages, and layout remain instance config, not compiled-in product concepts.
+
+### Scope
+
+- Reuse the existing Step 19 `current_date` context producer, for example:
+
+  ```yaml
+  context:
+    - id: today_date
+      type: current_date
+      timezone: "America/New_York"
+      format: "Monday January 2"
+  ```
+
+  Date context is already implemented; this step must preserve its deterministic behavior and timezone validation rather than reimplement it.
+
+- Add Gmail body format support. Prefer `multipart/alternative` so every rich email has both:
+  - `text/plain` fallback;
+  - `text/html` rich body.
+
+- Keep the first rich rendering path safe and small. Prefer one of these approaches over allowing arbitrary unsanitized model HTML:
+  - app-controlled conversion from plain structured lines/Markdown subset to safe HTML; or
+  - a tightly documented/rendered HTML mode with escaping/sanitization and a plain fallback.
+
+- Extend config without breaking existing plain-text notifier behavior. Possible shapes:
+
+  ```yaml
+  notifier:
+    type: gmail
+    gmail:
+      body_format: multipart # plain | html | multipart
+  ```
+
+  or per-renderer if job-level output format is cleaner:
+
+  ```yaml
+  render:
+    type: llm_template
+    output_format: html
+  ```
+
+- Update MIME generation so Gmail raw messages include correct content type headers, boundaries, and UTF-8 bodies.
+- Preserve secret-safe behavior: do not write generated email bodies, raw MIME payloads, access tokens, refresh tokens, or credential JSON to durable state/logs.
+- Update docs/config examples for a scheduled notification that uses `current_date` and rich Gmail output, while keeping user-specific source IDs redacted.
+
+### Tests
+
+Add deterministic tests for:
+
+- `current_date` config parsing and validation, including timezone handling;
+- `current_date` value rendering from a fixed `now` timestamp;
+- existing plain-text Gmail messages remain backward compatible;
+- rich Gmail messages generate valid MIME with a plain fallback and HTML part;
+- HTML content is escaped/sanitized or generated only from safe app-controlled input;
+- scheduled notification rendering can pass `{{ today_date }}` into the LLM prompt;
+- job state/progress files still do not persist prompts, generated bodies, raw MIME, or credentials.
+
+### Verification
+
+```bash
+go test ./...
+agent-harness jobs run daily-brief --instance default --home ~/.local/share/agent-harness/instances/default
+agent-harness jobs list --instance default --home ~/.local/share/agent-harness/instances/default --json
+agent-harness status --instance default --home ~/.local/share/agent-harness/instances/default --json
+```
+
+Live verification should send a controlled test email and confirm in Gmail that:
+
+- the message renders as rich text;
+- the plain-text fallback is present in the raw MIME;
+- the daily brief can include the current date via `{{ today_date }}`;
+- the installed binary reports a released version after the PR is merged and published, not a local `dev` build.
+
+---
+
 ## Future TODO — macOS and Windows runtime adapters
 
 - **Status:** Future

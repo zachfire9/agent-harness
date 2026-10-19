@@ -2,6 +2,8 @@
 
 `agent-harness` can run as a named background instance. The first supported runtime manager is Linux `systemd --user`.
 
+For a task-oriented walkthrough, start with [Configure a daily brief email](configure-daily-brief.md). This document is the field-level runtime reference.
+
 ## Layout
 
 Recommended user-level layout:
@@ -244,9 +246,10 @@ jobs:
 
 The `scheduled_notification` job type composes reusable notification pieces without hardcoding user-specific sections in Go. Each job declares named context values, renders a prompt template with those values, sends one LLM-generated body through the configured notifier, and advances any rotating-source progress only after delivery succeeds.
 
-Supported context producers in this first slice:
+Supported context producers:
 
-- `days_until_date`: computes a deterministic date countdown from config.
+- `days_until_date`: computes a deterministic date countdown from config using UTC calendar days.
+- `current_date`: supplies the job run date with optional timezone and standard Go layout; translation instructions belong in the configured LLM prompt.
 - `rotating_source_item`: reads a configured source, parses items, selects the next item with durable round-robin progress, and exposes the selected item text as a context value.
 
 Example:
@@ -307,6 +310,65 @@ jobs:
 ```
 
 The app code only knows generic context producer and renderer types; labels such as daily brief, birthday, or vocabulary live in instance config. `state/progress/<progress_key>.json` stores cursor metadata and item IDs, not document contents, prompts, generated message bodies, tokens, or API keys.
+
+### Date facts and configured translation requests
+
+`current_date` supplies an authoritative date derived from the job run timestamp. It accepts an optional IANA `timezone` (UTC by default) and a Go date-layout `format` (`Monday January 2, 2006` by default). Invalid timezones are rejected during config loading. A literal `\n` in the layout becomes a line break. Ordinary Go date formatting uses English weekday/month names; the runtime does not translate them or spell out numbers.
+
+For a scheduled notification, add date context and put translation instructions in the existing render prompt. This excerpt illustrates only the date portion; retain other context and prompt sections when adapting an existing job:
+
+```yaml
+context:
+  - id: today_date
+    type: current_date
+    timezone: "America/New_York"
+    format: "Monday, January 2, 2006"
+render:
+  type: llm_template
+  prompt: "The authoritative current date is {{ today_date }}. Use this date; do not infer today's date yourself. Write the date in Spanish, Italian, French, and German. Spell out the day number using natural conventions for each language. Put each language on its own line. Return only the notification body."
+  max_chars: 1200
+```
+
+The prompt stays on one physical line for compatibility with the runtime's YAML subset reader. Languages, wording, and output structure belong to instance config. Translation happens in the same single model call already used to render the notification, not in an additional request. Date/timezone resolution is deterministic; model-produced wording is not guaranteed to be identical or error-free. Tests can verify the exact date and instructions sent to a fake model without claiming to validate real translations.
+
+**Migrating temporary dev configurations:** custom placeholders such as `{weekday_es}`, `{month_it}`, `{day_fr}`, and `{day_de_ord}` are no longer expanded. Before deploying this version, replace localized layouts with a standard Go layout and move translation/spelled-out-number instructions into `render.prompt`. Also replace any old prompt instruction to copy pretranslated date lines verbatim. Unknown placeholder text remains literal; it is not a supported localization API. Private instance config and credentials do not belong in the repository.
+
+### Pattern-delimited source cards
+
+Use `parser: heading_pattern` when a source has recognizable headings followed by plain text, bullets, or both. For example, this context entry can be added to a scheduled notification job (with a matching `{{ card }}` placeholder in its render prompt):
+
+```yaml
+context:
+  - id: card
+    type: rotating_source_item
+    source:
+      type: local_file
+      path: "data/example-cards.txt"
+      parser: heading_pattern
+      heading_pattern: '^[0-9]+\s*-\s*\S+'
+    selection:
+      strategy: round_robin
+      progress_key: example-cards
+```
+
+Fake `data/example-cards.txt` contents:
+
+```text
+Example reference cards (this preamble is ignored).
+
+1 - Cedar
+An evergreen tree in this fictional collection.
+2024 observations are a fact, not a new heading.
+- Grows in the example garden.
+
+2 - Maple
+A second example card.
+* Has a different leaf shape.
+```
+
+The configured Go regular expression is checked against each trimmed non-empty line. Only matching lines start a new card; the complete matching line becomes its title. All subsequent non-empty plain or bullet lines belong to that card's body until the next matching heading. Leading `- `, `* `, and `• ` bullet markers are removed, empty bullets are skipped, and text before the first heading is ignored. The rendered context contains the title and body joined by newlines. The pattern must be non-empty, syntactically valid, and must not match empty text; otherwise configuration loading fails. Single-quoted YAML preserves regex backslashes.
+
+The same parser and `heading_pattern` work with `type: google_doc` and a configured `alias` instead of a local `path`. Use a separate `progress_key` for each independent rotation. Selection does not advance progress; successful notification delivery advances the selected item and wraps to the first card after the last, as with the existing parsers. `non_empty_lines` and `heading_with_bullets` remain available unchanged.
 
 ## Inspect and manually run jobs
 
@@ -437,16 +499,17 @@ The progress state records safe metadata only:
 
 It does not store full Google Doc text, delivered message bodies, OAuth tokens, refresh tokens, client secrets, or credential JSON.
 
-Current parser primitives are internal runtime capabilities for future jobs:
+Current parsers are available to `scheduled_notification` rotating sources (`google_doc` or instance-relative `local_file`):
 
 - `non_empty_lines`: trims blank lines and treats each remaining line as one item;
 - `heading_with_bullets`: treats a heading/title followed by bullet lines as a card with `title` and `body` fields.
+- `heading_pattern`: uses a configured regular expression to delimit headings with plain or bulleted body lines; see [pattern-delimited source cards](#pattern-delimited-source-cards).
 
 The selector uses cycle snapshots: it parses the current source into ordered item IDs at the start of a cycle, walks that snapshot until the last item, and refreshes the snapshot only at the next cycle boundary. This avoids surprising skips or repeats if a document is edited midway through a cycle.
 
 Cursor advancement is explicit. A caller selects/peeks the next item, performs the work, and advances progress only after successful completion or delivery. Failed sends should leave the cursor unchanged so the same item can be retried.
 
-Step 17 intentionally adds these primitives before adding a user-facing scheduled digest job. Step 18 will wire the Google Docs source, parser, progress cursor, and notifier together.
+Step 18 connects source selection and progress to scheduled notification delivery; Step 19 extends date context, local sources, and configurable card parsing. See the [setup walkthrough](configure-daily-brief.md) for a complete example.
 
 ## Run a daemon smoke test
 

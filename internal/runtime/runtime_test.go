@@ -1209,6 +1209,10 @@ jobs:
         date: "2063-10-28"
         label: "Zach's 80th birthday"
         output_format: "{days} days until {label}"
+      - id: today
+        type: current_date
+        timezone: "America/New_York"
+        format: "Monday January 2"
       - id: word
         type: rotating_source_item
         source:
@@ -1232,13 +1236,16 @@ jobs:
 		t.Fatalf("read runtime config failed: %v", err)
 	}
 	job := cfg.Jobs[0]
-	if job.Type != "scheduled_notification" || len(job.Context) != 2 {
+	if job.Type != "scheduled_notification" || len(job.Context) != 3 {
 		t.Fatalf("unexpected scheduled notification config: %#v", job)
 	}
 	if job.Context[0].ID != "countdown" || job.Context[0].Type != "days_until_date" || job.Context[0].Date != "2063-10-28" {
 		t.Fatalf("unexpected countdown context: %#v", job.Context[0])
 	}
-	rotating := job.Context[1]
+	if job.Context[1].ID != "today" || job.Context[1].Type != "current_date" || job.Context[1].Timezone != "America/New_York" || job.Context[1].Format != "Monday January 2" {
+		t.Fatalf("unexpected current date context: %#v", job.Context[1])
+	}
+	rotating := job.Context[2]
 	if rotating.ID != "word" || rotating.Type != "rotating_source_item" || rotating.Source.Alias != "vocabulary_doc_id" || rotating.Source.Parser != ProgressParserNonEmptyLines || rotating.Selection.ProgressKey != "vocabulary-daily-brief" {
 		t.Fatalf("unexpected rotating context: %#v", rotating)
 	}
@@ -1284,6 +1291,61 @@ func TestRunScheduledNotificationUsesOneLLMCallAndAdvancesProgressAfterSend(t *t
 	}
 	if progress.Cursor.NextIndex != 1 || progress.History.LastSelectedID != "equanimity" {
 		t.Fatalf("expected progress to advance after send, got %#v", progress)
+	}
+}
+
+func TestRunScheduledNotificationReadsRotatingLocalFileSource(t *testing.T) {
+	paths, err := LinuxPaths(t.TempDir(), "default")
+	if err != nil {
+		t.Fatalf("expected paths, got %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(paths.Home, "data"), 0o755); err != nil {
+		t.Fatalf("make data dir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.Home, "data", "cards.txt"), []byte("Cedar\n- First example fact\n- Second example fact\nMaple\n- Another example fact\n"), 0o644); err != nil {
+		t.Fatalf("write local source failed: %v", err)
+	}
+	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	notifier := &recordingNotifier{}
+	client := &recordingLLMClient{response: "body"}
+	cfg := scheduledNotificationTestConfig()
+	cfg.Context = []NotificationContextConfig{{
+		ID:   "card",
+		Type: "rotating_source_item",
+		Source: NotificationSourceConfig{
+			Type:   "local_file",
+			Path:   "data/cards.txt",
+			Parser: ProgressParserHeadingWithBullets,
+		},
+		Selection: NotificationSelectionConfig{Strategy: "round_robin", ProgressKey: "example-cards"},
+	}}
+	cfg.Render.Prompt = "Card: {{ card }}"
+
+	state, err := runScheduledNotificationWithClients(paths, now, cfg, notifier, client, nil)
+	if err != nil {
+		t.Fatalf("run scheduled notification failed: %v", err)
+	}
+	if state.Status != JobSucceeded {
+		t.Fatalf("unexpected state: %#v", state)
+	}
+	prompt := client.requests[0].Messages[1].Content
+	if !strings.Contains(prompt, "Cedar\nFirst example fact\nSecond example fact") {
+		t.Fatalf("expected local source item in prompt, got %q", prompt)
+	}
+	progress, err := ReadProgressState(paths, "example-cards")
+	if err != nil {
+		t.Fatalf("read progress failed: %v", err)
+	}
+	if progress.Cursor.NextIndex != 1 || progress.Snapshot.SourceAlias != "local_file:data/cards.txt" {
+		t.Fatalf("expected local source progress to advance, got %#v", progress)
+	}
+}
+
+func TestTrimTrailingLineWhitespace(t *testing.T) {
+	got := trimTrailingLineWhitespace("Daily Brief  \n\tIndented\t\r\nClean")
+	want := "Daily Brief\n\tIndented\nClean"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 
@@ -1347,6 +1409,7 @@ func scheduledNotificationTestConfig() JobConfig {
 		Interval: 24 * time.Hour,
 		Context: []NotificationContextConfig{
 			{ID: "countdown", Type: "days_until_date", Date: "2063-10-28", Label: "Zach's 80th birthday", OutputFormat: "{days} days until {label}"},
+			{ID: "today", Type: "current_date", Timezone: "America/New_York", Format: "Monday January 2"},
 			{
 				ID:   "word",
 				Type: "rotating_source_item",
@@ -1360,7 +1423,7 @@ func scheduledNotificationTestConfig() JobConfig {
 		},
 		Render: NotificationRenderConfig{
 			Type:     "llm_template",
-			Prompt:   "Write the complete email body. Countdown: {{ countdown }}. Word: {{ word }}. Include a definition and sentence. Return only the body.",
+			Prompt:   "Write the complete email body. Countdown: {{ countdown }}. Today: {{ today }}. Word: {{ word }}. Include a definition and sentence. Return only the body.",
 			MaxChars: 1200,
 		},
 		LLM: LLMConfig{Provider: "openai", Model: "gpt-4o-mini", APIKeyEnv: "OPENAI_API_KEY"},

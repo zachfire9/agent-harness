@@ -78,15 +78,19 @@ type NotificationContextConfig struct {
 	Type         string
 	Date         string
 	Label        string
+	Timezone     string
+	Format       string
 	OutputFormat string
 	Source       NotificationSourceConfig
 	Selection    NotificationSelectionConfig
 }
 
 type NotificationSourceConfig struct {
-	Type   string
-	Alias  string
-	Parser string
+	Type           string
+	Alias          string
+	Path           string
+	Parser         string
+	HeadingPattern string
 }
 
 type NotificationSelectionConfig struct {
@@ -489,6 +493,10 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				currentContext.Date = value
 			case "label":
 				currentContext.Label = value
+			case "timezone":
+				currentContext.Timezone = value
+			case "format":
+				currentContext.Format = value
 			case "output_format":
 				currentContext.OutputFormat = value
 			}
@@ -500,8 +508,12 @@ func parseRuntimeConfig(file *os.File) ([]JobConfig, GoogleConfig, NotifierConfi
 				currentContext.Source.Type = value
 			case "alias":
 				currentContext.Source.Alias = value
+			case "path":
+				currentContext.Source.Path = value
 			case "parser":
 				currentContext.Source.Parser = value
+			case "heading_pattern":
+				currentContext.Source.HeadingPattern = value
 			}
 			continue
 		}
@@ -816,18 +828,37 @@ func validateScheduledNotificationJobConfig(job JobConfig, cfg RuntimeConfig) er
 			if strings.TrimSpace(item.Label) == "" {
 				return fmt.Errorf("scheduled_notification job %q context %q requires label", job.Name, item.ID)
 			}
+		case "current_date":
+			if strings.TrimSpace(item.Timezone) != "" {
+				if _, err := time.LoadLocation(item.Timezone); err != nil {
+					return fmt.Errorf("scheduled_notification job %q context %q has invalid timezone %q", job.Name, item.ID, item.Timezone)
+				}
+			}
 		case "rotating_source_item":
-			if item.Source.Type != "google_doc" {
+			if item.Source.Type != "google_doc" && item.Source.Type != "local_file" {
 				return fmt.Errorf("scheduled_notification job %q context %q unsupported source type %q", job.Name, item.ID, item.Source.Type)
 			}
-			if strings.TrimSpace(item.Source.Alias) == "" {
+			if item.Source.Type == "google_doc" && strings.TrimSpace(item.Source.Alias) == "" {
 				return fmt.Errorf("scheduled_notification job %q context %q requires source alias", job.Name, item.ID)
 			}
-			if strings.TrimSpace(cfg.Sources.GoogleDocs[item.Source.Alias]) == "" {
+			if item.Source.Type == "google_doc" && strings.TrimSpace(cfg.Sources.GoogleDocs[item.Source.Alias]) == "" {
 				return fmt.Errorf("scheduled_notification job %q context %q references unknown source alias %q", job.Name, item.ID, item.Source.Alias)
 			}
-			if item.Source.Parser != ProgressParserNonEmptyLines {
+			if item.Source.Type == "local_file" {
+				if strings.TrimSpace(item.Source.Path) == "" {
+					return fmt.Errorf("scheduled_notification job %q context %q requires source path", job.Name, item.ID)
+				}
+				if err := validateInstanceRelativePath(item.Source.Path); err != nil {
+					return fmt.Errorf("scheduled_notification job %q context %q has invalid source path: %w", job.Name, item.ID, err)
+				}
+			}
+			if item.Source.Parser != ProgressParserNonEmptyLines && item.Source.Parser != ProgressParserHeadingWithBullets && item.Source.Parser != ProgressParserHeadingPattern {
 				return fmt.Errorf("scheduled_notification job %q context %q unsupported parser %q", job.Name, item.ID, item.Source.Parser)
+			}
+			if item.Source.Parser == ProgressParserHeadingPattern {
+				if _, err := compileProgressHeadingPattern(item.Source.HeadingPattern); err != nil {
+					return fmt.Errorf("scheduled_notification job %q context %q: %w", job.Name, item.ID, err)
+				}
 			}
 			if item.Selection.Strategy != "round_robin" {
 				return fmt.Errorf("scheduled_notification job %q context %q unsupported selection strategy %q", job.Name, item.ID, item.Selection.Strategy)
