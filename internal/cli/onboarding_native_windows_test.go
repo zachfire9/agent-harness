@@ -115,6 +115,45 @@ func TestNativeOnboardingSmoke(t *testing.T) {
 	}
 }
 
+// This subprocess has no settings or credentials: it isolates the ConPTY launch
+// boundary from the onboarding lifecycle, including when go test has pipe-backed
+// standard handles (as on CI).
+func TestConPTYStandardHandles(t *testing.T) {
+	const childEnv = "HARNESS_CONPTY_HANDLES_CHILD"
+	if os.Getenv(childEnv) == "1" {
+		getMode := syscall.NewLazyDLL("kernel32.dll").NewProc("GetConsoleMode")
+		for _, f := range []*os.File{os.Stdin, os.Stdout, os.Stderr} {
+			var mode uint32
+			ok, _, err := getMode.Call(f.Fd(), uintptr(unsafe.Pointer(&mode)))
+			if ok == 0 {
+				t.Fatalf("%s is not a console handle: %v", f.Name(), err)
+			}
+		}
+		ui, err := onboarding.NewConsole(os.Stdin, os.Stdout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Require both stdout and stderr to reach the pseudoconsole capture.
+		fmt.Fprintln(os.Stdout, "console stdout ready")
+		fmt.Fprintln(os.Stderr, "console stderr ready")
+		if _, err := ui.Ask("console input ready", ""); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(childEnv, "1")
+	output := runConsole(t, exe, []string{"-test.run=^TestConPTYStandardHandles$"}, []consoleStep{{"console input ready", "yes"}})
+	for _, marker := range []string{"console stdout ready", "console stderr ready"} {
+		if !strings.Contains(output, marker) {
+			t.Fatalf("pseudoconsole did not capture %q", marker)
+		}
+	}
+}
+
 type consoleStep struct{ prompt, answer string }
 type lockedOutput struct {
 	sync.Mutex
@@ -181,6 +220,9 @@ func runConsole(t *testing.T, exe string, args []string, steps []consoleStep) st
 	}
 	si := startupEx{Attributes: attrs}
 	si.Cb = uint32(unsafe.Sizeof(si))
+	// Do not inherit the runner's redirected standard handles. Explicit NULL
+	// handles let console initialization supply this pseudoconsole's handles.
+	si.Flags = syscall.STARTF_USESTDHANDLES
 	command := syscall.EscapeArg(exe)
 	for _, a := range args {
 		command += " " + syscall.EscapeArg(a)
