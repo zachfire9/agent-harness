@@ -4,11 +4,11 @@
 
 Use a normal **non-administrator PowerShell 5.1 or 7** window on Windows amd64. You need internet access and an OpenAI-compatible API account with billing enabled. No Go, Git, source checkout, `init`, daemon, Task Scheduler, or installer is needed to chat.
 
-**Availability:** this guide requires the first release containing **Step 22 (`setup`) or later**. No numbered supporting release is claimed yet; v0.1.5 does not contain it, and a Step-21-only Windows binary is insufficient. Implementation, Linux checks, and [native Windows onboarding verification](https://github.com/zachfire9/agent-harness/actions/runs/39298133159) passed on the Step 22 branch; publication is still pending. Stop if the release does not explicitly include Step 22.
+**Availability:** this guide requires **v0.1.7 or later**, the first release with `setup` (Step 22). v0.1.6 has the Windows runtime but not `setup`, and v0.1.5 and earlier have no Windows build. [Native Windows onboarding verification](https://github.com/zachfire9/agent-harness/actions/runs/39298133159) runs in CI before every release. Use the latest release unless you have a reason not to.
 
 ## 1. Download, verify, and extract
 
-1. Open [Releases](https://github.com/zachfire9/agent-harness/releases). Download `agent-harness_<version>_windows_amd64.zip` and `checksums.txt` from the **same** Step-22-capable release.
+1. Open [Releases](https://github.com/zachfire9/agent-harness/releases). Download `agent-harness_<version>_windows_amd64.zip` and `checksums.txt` from the **same** release (v0.1.7 or later).
 2. In PowerShell, run `Get-FileHash -Algorithm SHA256 -LiteralPath '<downloaded ZIP path>'`. Compare its entire hash with the line for that exact ZIP in `checksums.txt`. Stop on a missing/duplicate entry or mismatch. A matching checksum detects corruption, not a compromised publisher; download only from the trusted release. Do not bypass organizational security warnings or elevate to run an untrusted binary.
 3. Right-click the ZIP → **Extract All** into a new folder. Open PowerShell in that extracted folder. The ZIP contains `agent-harness.exe`, `INSTALL.md`, `WINDOWS.md`, and `FIRST-CONVERSATION.md` (this guide).
 4. Run:

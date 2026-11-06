@@ -1566,7 +1566,7 @@ Verification is isolated: temporary instance directories, fake model/token, and 
 
 ## Step 21 — Windows current-user background runtime
 
-- **Status:** Completed (implementation and native verification; merge/release/install pending)
+- **Status:** Completed; merged in #43 and released in v0.1.6.
 - **Branch:** `step-21-windows-runtime`
 - **Pull Request:** [#43](https://github.com/zachfire9/agent-harness/pull/43)
 - **Concept:** Add a limited current-user at-login Task Scheduler adapter, without administrator access or a saved password. Reuse shared daemon/jobs/status; leave Linux/systemd unchanged.
@@ -1581,7 +1581,7 @@ Verification is isolated: temporary instance directories, fake model/token, and 
 - [x] Native CLI/ACL/task smoke script and Ubuntu/Windows reusable CI gate before release publication.
 - [x] Execute native Windows unit/vet and CLI/ACL smoke; [CI evidence](https://github.com/zachfire9/agent-harness/actions/runs/39276862161).
 - [x] Execute full native register/query/start/fresh heartbeat/stop/unregister lifecycle in an interactive session; the same CI run records all lifecycle PASS markers and cleanup. Session-0/token-unavailable output remains failure, not E2E success.
-- [x] Open implementation PR after review; merge/release/install require separate approval.
+- [x] Open implementation PR after review; merged in #43 and released in v0.1.6.
 
 ### Verification and limits
 
@@ -1593,7 +1593,7 @@ The adapter runs only while its user is logged in: no boot/before-login or after
 
 ## Step 22 — Guided Windows onboarding and first conversation
 
-- **Status:** Completed; implementation and native Windows CI verified. Not yet merged, released, or installed.
+- **Status:** Completed; merged in #44 and released in v0.1.7.
 - **Branch:** `step-22-windows-onboarding`
 - **Pull Request:** https://github.com/zachfire9/agent-harness/pull/44
 - **Concept:** Replace repeated PowerShell setup blocks with a first-run wizard and a repeatable chat entry point. Download/extract the Windows ZIP, run `agent-harness.exe setup`, answer a few prompts, then use `agent-harness chat` or a shortcut on later visits.
@@ -1620,7 +1620,7 @@ Implementation inventory (checked items below indicate implemented code/docs, no
 - [x] Offer opt-in user PATH integration and a terminal chat shortcut; never modify machine PATH or require elevation. Use stable absolute executable paths, quote paths safely, and keep secrets out of shortcut arguments. Skip existing PATH entries and review conflicts rather than replacing another installation.
 - [x] Make setup rerunnable without losing settings or overwriting credentials/workspaces unexpectedly. Document rollback/removal for settings, credential entries, optional shortcut, and user PATH entry; do not delete user workspace files.
 - [x] Keep first-run logging off unless the user opts in; distinguish in-memory chat history from diagnostic logs and persistent settings.
-- [x] Replace the beginner walkthrough's large setup blocks with the actual wizard flow once available, retaining manual setup as an advanced fallback. Link from README and packaged Windows instructions, and state the minimum supporting release (first Step-22-capable release, number not yet assigned/published).
+- [x] Replace the beginner walkthrough's large setup blocks with the actual wizard flow once available, retaining manual setup as an advanced fallback. Link from README and packaged Windows instructions, and state the minimum supporting release (v0.1.7).
 - [x] Preserve Linux CLI behavior and the shared agent/tool loop. Keep platform-specific credential, path, and shortcut integration behind small testable boundaries.
 
 ### Tests and verification
@@ -1654,6 +1654,21 @@ This step is onboarding for the existing interactive agent, not a GUI/desktop-co
 - Document `launchctl bootstrap gui/$(id -u)`, `launchctl print`, and `launchctl bootout` lifecycle and login limitations.
 - Add native macOS tests, artifact packaging/checksums, install/update/security docs, and release gates before claiming support.
 - Preserve Linux/systemd and Windows Task Scheduler behavior. Do not make later adapters prerequisites for the original Linux MVP.
+
+---
+
+## Maintenance — November 2026 security and toolchain review
+
+- **Status:** Completed; released in v0.1.8 (toolchain/CI) and v0.1.9 (application fixes).
+- **Concept:** A review-driven maintenance pass, outside the numbered feature steps. Each item shipped as its own small PR with tests.
+
+| PR | Change | Release |
+|---|---|---|
+| [#45](https://github.com/zachfire9/agent-harness/pull/45) | `.gitattributes` pins LF line endings, which removes phantom whole-file diffs on Windows | v0.1.8 |
+| [#46](https://github.com/zachfire9/agent-harness/pull/46) | Go 1.27.1 → 1.27.3 (stdlib security fixes); version-pinned `govulncheck` in CI; `actions/checkout` and `actions/setup-go` v7 pinned to commit SHAs with `persist-credentials: false`; Dependabot for Actions and Go modules | v0.1.8 |
+| [#47](https://github.com/zachfire9/agent-harness/pull/47) | Test suite passes on a non-elevated Windows machine (isolated user config, no `pwd` dependency, ACL fixture writes only Owner/Access) | v0.1.8 |
+| [#48](https://github.com/zachfire9/agent-harness/pull/48) | `search_files` no longer follows symlinks out of the workspace or to blocked files; case-insensitive sensitive-file matching including `.env.*`; `pwd` dropped from the Windows default allowlist | v0.1.9 |
+| [#49](https://github.com/zachfire9/agent-harness/pull/49) | Timeouts on all outbound HTTP (5 min model, 30 s Google) with a source guard against `http.DefaultClient`; owner-only (`0600`/`0700`) runtime files, tightening existing installs | v0.1.9 |
 
 ---
 

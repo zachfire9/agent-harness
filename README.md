@@ -6,7 +6,7 @@ The goal of this repo is to make each agent concept understandable through small
 
 ## Start here on Windows
 
-**[Your first Windows conversation](docs/windows-first-conversation.md)** walks from a verified Windows ZIP to `agent-harness.exe setup`, hidden key entry (Credential Manager or session-only), a dedicated workspace, and chat—no Go, Git, daemon, or scheduled task needed. The ZIP includes this guide as `FIRST-CONVERSATION.md`. Step 22 is implemented in the working branch, with native Windows verification and a supporting release still pending; v0.1.5 and Step-21-only binaries do not include `setup`. For optional background jobs instead, see the [Windows runtime guide](docs/windows-runtime.md).
+**[Your first Windows conversation](docs/windows-first-conversation.md)** walks from a verified Windows ZIP to `agent-harness.exe setup`, hidden key entry (Credential Manager or session-only), a dedicated workspace, and chat—no Go, Git, daemon, or scheduled task needed. The ZIP includes this guide as `FIRST-CONVERSATION.md`. `setup` is available in **v0.1.7 and later**; v0.1.6 (Windows runtime only) and earlier releases do not include it. For optional background jobs instead, see the [Windows runtime guide](docs/windows-runtime.md).
 
 ## What this project demonstrates
 
@@ -46,7 +46,7 @@ The project currently has:
 - durable JSONL run/session logs under the configured local run-log directory, with structured context/truncation records and secret redaction
 - provider-neutral vector store abstraction with a default `none` implementation for future RAG support without requiring a vector database yet
 - user-level background runtime commands for named instances, status files, and systemd user service installation
-- version metadata embedded at build time plus automated GitHub Release artifacts for Linux amd64/arm64 and Windows amd64 installs (Windows added in Step 21; native CI verified, release pending)
+- version metadata embedded at build time plus automated GitHub Release artifacts for Linux amd64/arm64 and Windows amd64 installs (Windows amd64 published since v0.1.6)
 - a configurable scheduled-job registry with interval and daily time-of-day schedules, a default heartbeat job, a local check-in job, notification test jobs, and bounded AI email jobs that can be inspected or manually triggered from the CLI
 - Google account connection metadata commands for secret-safe auth status, composable scope-alias inspection, local token revocation, and access-token refresh for Google-backed actions
 - a Google Docs read-only source adapter that reads explicitly configured document IDs by local alias
@@ -83,7 +83,7 @@ The `internal` packages are split so each concept can be tested in isolation. Th
 
 For an end-to-end setup guide, see [Configure a daily brief email](docs/configure-daily-brief.md): one complete config, Google/model credentials, rotating sources, safe testing, and Linux service startup. **v0.1.4 supports the Step 19 example** (`current_date`, local sources, and configurable card headings); v0.1.3 does not. Optional safe rich Gmail bodies (`notifier.gmail.body_format: multipart`) are available in **v0.1.5**. Plain remains the default; see [body formats](docs/configure-daily-brief.md#optional-rich-gmail-bodies-step-20-v015).
 
-Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Native Windows verification passed in the isolated CI run linked in that guide; a published Windows release is still pending, and v0.1.5 does not include this adapter. Linux/systemd behavior remains unchanged. Guided Windows onboarding is implemented as Step 22 in the working branch (native verification/release pending); macOS/launchd follows as Step 23.
+Step 21 adds a [Windows runtime guide](docs/windows-runtime.md): current-user Task Scheduler, Interactive token, Limited privileges, at-login only, private credential ACLs, and Windows ZIP installation. Windows releases are published from **v0.1.6**; v0.1.5 and earlier are Linux-only. Linux/systemd behavior remains unchanged. Guided Windows onboarding (Step 22) is available in **v0.1.7 and later**; macOS/launchd follows as Step 23.
 
 ## Quick start
 
