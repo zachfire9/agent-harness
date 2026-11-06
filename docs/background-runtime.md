@@ -453,7 +453,7 @@ When both `scopes` and `scope_profile` are present, `scopes` takes precedence. T
 
 Every other runtime file under the instance home is owner-only too, because status, job output, the notification outbox, and progress cursors can contain generated email bodies, document excerpts, and account metadata. On Linux and macOS, instance directories are `0700` and these files are `0600`. Files and directories left more open by an older release are tightened the next time they are written (and when `init` runs); an existing `config.yaml` is never rewritten, only its mode is tightened. On Windows, privacy comes from the per-user `%LOCALAPPDATA%` ACLs that the instance home inherits.
 
-Outbound requests are bounded: Google OAuth, Docs, and Gmail calls time out after 30 seconds, and OpenAI-compatible model calls after 5 minutes, so a stalled connection cannot hang a scheduled job.
+Outbound requests are bounded: Google OAuth, Docs, and Gmail calls time out after 30 seconds, and OpenAI-compatible model calls after 5 minutes, so a stalled connection cannot hang a scheduled job. Background jobs do not stream; streaming (with its 2-minute idle limit instead of a total limit) is only used for interactive `chat` and terminal `ask`.
 
 Inspect Google auth state without printing token values:
 

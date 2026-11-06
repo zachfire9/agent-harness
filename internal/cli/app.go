@@ -42,6 +42,8 @@ type App struct {
 	vectorStore         vectorstore.Store
 	vectorStoreProvider string
 	interactive         *bool // nil: detect from stdin; set by WithInteractiveInput
+	streamOutput        *bool // nil: detect from stdout; set by WithTerminalOutput
+	newTurnContext      func() (context.Context, context.CancelFunc)
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
@@ -779,6 +781,7 @@ func writeServiceHints(stdout io.Writer, instance, goos string) {
 func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int {
 	traceEnabled, promptArgs := parseTraceFlag(promptArgs)
 	autoApprove, promptArgs := parseApproveCommandsFlag(promptArgs)
+	noStream, promptArgs := parseNoStreamFlag(promptArgs)
 	prompt := strings.TrimSpace(strings.Join(promptArgs, " "))
 	if prompt == "" {
 		fmt.Fprintln(stderr, "ask requires a prompt")
@@ -809,6 +812,11 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		return 1
 	}
 	runner := agent.NewWithToolsContextLimitsSummarizerAndVectorStore(a.chatClient, a.model, registry, a.contextLimits, a.summarizer, a.vectorStore)
+	// Stream only to a terminal: piped/scripted output stays the final answer.
+	printer := &replyPrinter{out: stdout}
+	if !noStream && a.outputIsTerminal(stdout) {
+		runner = runner.WithTextStream(printer.stream())
+	}
 	result, err := runner.Run(context.Background(), prompt)
 	if err != nil {
 		writeRunError(logger, err)
@@ -822,13 +830,16 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 		writeTraceConfig(stderr, a)
 		writeTrace(stderr, result.TraceEvents)
 	}
-	fmt.Fprintln(stdout, result.Answer)
+	if !printer.printed {
+		fmt.Fprintln(stdout, result.Answer)
+	}
 	return 0
 }
 
 func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 	traceEnabled, args := parseTraceFlag(args)
-	autoApprove, _ := parseApproveCommandsFlag(args)
+	autoApprove, args := parseApproveCommandsFlag(args)
+	noStream, _ := parseNoStreamFlag(args)
 	if a.chatClient == nil {
 		fmt.Fprintln(stderr, "chat requires a chat client")
 		return 1
@@ -893,10 +904,23 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 			pendingSummary = nil
 		}
 
-		result, err := runner.RunWithSummary(context.Background(), history, summary, prompt)
+		printer := &replyPrinter{out: stdout, prefix: "Agent: "}
+		turnRunner := runner
+		if !noStream {
+			turnRunner = runner.WithTextStream(printer.stream())
+		}
+		turnCtx, stopTurn := a.turnContext()
+		result, err := turnRunner.RunWithSummary(turnCtx, history, summary, prompt)
+		cancelled := turnWasCancelled(turnCtx, err)
+		stopTurn()
 		if err != nil {
 			writeRunStart(logger, prompt)
 			writeRunError(logger, err)
+			if cancelled {
+				// The interrupted turn is dropped; history is unchanged.
+				fmt.Fprintln(stdout, "(reply cancelled)")
+				continue
+			}
 			fmt.Fprintf(stderr, "chat turn failed: %v\n", err)
 			continue
 		}
@@ -910,7 +934,9 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 			writeTraceConfig(stderr, a)
 			writeTrace(stderr, result.TraceEvents)
 		}
-		fmt.Fprintf(stdout, "Agent: %s\n", result.Answer)
+		if !printer.printed {
+			fmt.Fprintf(stdout, "Agent: %s\n", result.Answer)
+		}
 		pendingSummary = startSummaryJob(context.Background(), history, summary, a.contextLimits, a.summarizer)
 		if traceEnabled && pendingSummary != nil {
 			writeTraceSummaryJob(stderr, "started")

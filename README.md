@@ -192,6 +192,8 @@ An agent is a program that uses a model to decide what to do next, optionally ca
 
 If config is missing, the command fails before making a model call and prints a helpful config error.
 
+When stdout is a terminal, `ask` streams the reply as it is generated, including any short note the model writes before calling a tool. When output is piped or redirected, `ask` prints only the final answer once it is complete, so scripts see the same output as before. Add `--no-stream` to always wait for the complete answer.
+
 ### Trace an ask run
 
 Add `--trace` to print human-readable observability details to stderr while keeping the assistant answer on stdout:
@@ -232,6 +234,10 @@ Goodbye.
 ```
 
 The first chat implementation keeps history only in memory for the lifetime of the process. Use `/exit`, `exit`, `quit`, or EOF to end the session.
+
+Replies stream in as the model generates them. If the model writes a note before calling a tool ("Let me check the status."), that note appears on its own `Agent:` line, before any command approval prompt. **Ctrl+C while a reply is streaming cancels just that reply**, prints `(reply cancelled)`, and leaves the conversation as it was before that message. Ctrl+C at the `You:` prompt still exits. Use `chat --no-stream` to wait for each complete reply instead.
+
+A streamed reply has no overall time limit, so a long answer that is still arriving is never cut off. It fails only if no data arrives for 2 minutes, which includes the wait for the first token, because reasoning models can think for a while before writing. Requests that are not streamed (`--no-stream`, piped `ask`, background jobs, summaries) keep the 5-minute total limit.
 
 ### Tool debug command
 
