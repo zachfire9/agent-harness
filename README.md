@@ -419,10 +419,11 @@ These are intentionally not part of the first learning sequence:
 
 - Web UI
 - Telegram bot interface
-- Scheduler/cron jobs
 - GitHub issue/PR tools
 - Multi-agent delegation
 - Long-term memory
 - Browser/web search tools
 
-They are good follow-up milestones once the basic local CLI agent harness is understandable and reviewable.
+They are good follow-up milestones once the basic local CLI agent harness is understandable and reviewable. (Scheduled jobs were on this list and have since shipped as the background runtime.)
+
+Features that have been discussed and scoped in detail, but not started, are recorded with their design decisions and open questions in the [feature backlog](docs/plans/feature-backlog.md).
