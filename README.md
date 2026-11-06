@@ -267,6 +267,16 @@ go run ./cmd/agent-harness tool run_command '{"command":"pwd","confirm":true}'
 
 The initial allowlist is intentionally small: `pwd` (Linux/macOS only), `git status`, `git status --short`, `git diff`, and `go test ./...`. Because commands run without a shell, `pwd` is left out on Windows, where it exists only as a PowerShell alias or shell built-in. The tool exposes that allowlist to the model as a JSON-schema enum, supports optional per-command descriptions for custom/local software, rejects commands outside that exact allowlist, rejects calls without `confirm:true`, runs without a shell, enforces a timeout, and returns JSON containing `command`, `exit_code`, `stdout`, and `stderr`.
 
+`confirm:true` comes from the model, so it is not human approval. In `ask` and `chat` a person approves every command the model wants to run:
+
+| How `ask`/`chat` is run | What happens when the model calls `run_command` |
+|---|---|
+| In an interactive terminal | Prompts `The agent wants to run: <command>` / `Allow? [y/N]:`. Only `y` or `yes` runs it; anything else, or end of input, declines. |
+| Input piped or redirected (scripts, services) | Declined without prompting, so piped input can never answer the prompt. |
+| With `--approve-commands` | Allowlisted commands run without prompting. Use it only for scripts you trust; the allowlist and `confirm:true` checks still apply. |
+
+A declined command is reported to the model as `{"command":…,"approved":false,"reason":…}`, so the agent can still answer without the output. The `tool run_command` debug command above does not prompt, because you typed the command yourself. Background jobs never receive tools. If they ever do, they should deny by default and use an allowlist fixed in the job config, never one decided by the model at run time.
+
 ## Core architecture
 
 At runtime, the app flows through a few focused layers:

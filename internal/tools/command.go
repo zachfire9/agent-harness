@@ -18,6 +18,32 @@ type RunCommandTool struct {
 	allowedCommands map[string]bool
 	allowedList     []AllowedCommand
 	timeout         time.Duration
+	approver        CommandApprover
+}
+
+// CommandApprover asks a person whether an allowlisted command may run.
+//
+// The model-supplied confirm field only shows the model meant to run the
+// command; it is not human approval. An approver is the human gate. It is
+// consulted only after the allowlist and confirm checks pass, so a person is
+// never asked about a command that could not run anyway. When approved is
+// false, reason is returned to the model so it can continue without the output.
+type CommandApprover interface {
+	ApproveCommand(ctx context.Context, command string) (approved bool, reason string)
+}
+
+// CommandApproverFunc adapts a function to CommandApprover.
+type CommandApproverFunc func(ctx context.Context, command string) (bool, string)
+
+// ApproveCommand calls f.
+func (f CommandApproverFunc) ApproveCommand(ctx context.Context, command string) (bool, string) {
+	return f(ctx, command)
+}
+
+type runCommandDeclined struct {
+	Command  string `json:"command"`
+	Approved bool   `json:"approved"`
+	Reason   string `json:"reason"`
 }
 
 // AllowedCommand describes one exact command the model may request.
@@ -58,12 +84,20 @@ func NewRunCommandTool(allowedCommands []AllowedCommand, timeout time.Duration) 
 	return RunCommandTool{allowedCommands: allowed, allowedList: allowedList, timeout: timeout}
 }
 
+// WithApprover returns a copy of the tool that asks approver before every run.
+// Without an approver (for example the `tool` debug command, where the person
+// typed the command themselves) allowlisted, confirmed commands run directly.
+func (t RunCommandTool) WithApprover(approver CommandApprover) RunCommandTool {
+	t.approver = approver
+	return t
+}
+
 // Name returns the registry name for the gated command tool.
 func (RunCommandTool) Name() string { return "run_command" }
 
 // Description explains the tool policy to the model.
 func (RunCommandTool) Description() string {
-	return "Run an explicitly allowlisted local command only when confirmation is provided with confirm=true; captures stdout/stderr and enforces a timeout"
+	return "Run an explicitly allowlisted local command only when confirmation is provided with confirm=true; captures stdout/stderr and enforces a timeout. The user may be asked to approve each run; if they decline, the result has approved=false and a reason, and the command did not run"
 }
 
 // JSONSchema declares run_command arguments.
@@ -100,6 +134,17 @@ func (t RunCommandTool) Execute(ctx context.Context, args json.RawMessage) (stri
 	}
 	if !t.allowedCommands[parsed.Command] {
 		return "", fmt.Errorf("command is not allowed: %s", parsed.Command)
+	}
+	if t.approver != nil {
+		if approved, reason := t.approver.ApproveCommand(ctx, parsed.Command); !approved {
+			// A declined command is a normal tool result, not an error, so the
+			// agent turn continues and the model can answer without the output.
+			payload, err := json.Marshal(runCommandDeclined{Command: parsed.Command, Approved: false, Reason: reason})
+			if err != nil {
+				return "", fmt.Errorf("encode declined command result: %w", err)
+			}
+			return string(payload), nil
+		}
 	}
 
 	fields := strings.Fields(parsed.Command)
