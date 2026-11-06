@@ -20,9 +20,11 @@ const DefaultRequestTimeout = 5 * time.Minute
 
 // OpenAIClient calls an OpenAI-compatible chat completions API.
 type OpenAIClient struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
+	baseURL           string
+	apiKey            string
+	httpClient        *http.Client
+	streamHTTPClient  *http.Client
+	streamIdleTimeout time.Duration
 }
 
 // NewOpenAIClient creates a chat client for an OpenAI-compatible API base URL.
@@ -31,6 +33,10 @@ func NewOpenAIClient(baseURL string, apiKey string) *OpenAIClient {
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		apiKey:     apiKey,
 		httpClient: &http.Client{Timeout: DefaultRequestTimeout},
+		// A stream has no total deadline (a long answer may legitimately take
+		// longer than DefaultRequestTimeout); ChatStream bounds idle time instead.
+		streamHTTPClient:  &http.Client{},
+		streamIdleTimeout: DefaultStreamIdleTimeout,
 	}
 }
 
@@ -43,21 +49,7 @@ func (c *OpenAIClient) WithTimeout(d time.Duration) *OpenAIClient {
 
 // Chat sends one chat completions request and returns the first assistant message.
 func (c *OpenAIClient) Chat(ctx context.Context, request ChatRequest) (ChatResponse, error) {
-	payload := openAIChatRequest{
-		Model:    request.Model,
-		Messages: make([]openAIMessage, len(request.Messages)),
-		Tools:    openAIToolSpecs(request.Tools),
-	}
-	for i, message := range request.Messages {
-		payload.Messages[i] = openAIMessage{
-			Role:       string(message.Role),
-			Content:    message.Content,
-			ToolCallID: message.ToolCallID,
-			ToolCalls:  openAIToolCalls(message.ToolCalls),
-		}
-	}
-
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(newOpenAIChatRequest(request, false))
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
 	}
@@ -84,6 +76,28 @@ func (c *OpenAIClient) Chat(ctx context.Context, request ChatRequest) (ChatRespo
 		return ChatResponse{}, fmt.Errorf("OpenAI-compatible chat request failed: status %d: %s", httpResponse.StatusCode, parseOpenAIErrorMessage(responseBody))
 	}
 
+	return decodeOpenAIChatResponse(responseBody)
+}
+
+func newOpenAIChatRequest(request ChatRequest, stream bool) openAIChatRequest {
+	payload := openAIChatRequest{
+		Model:    request.Model,
+		Messages: make([]openAIMessage, len(request.Messages)),
+		Tools:    openAIToolSpecs(request.Tools),
+		Stream:   stream,
+	}
+	for i, message := range request.Messages {
+		payload.Messages[i] = openAIMessage{
+			Role:       string(message.Role),
+			Content:    message.Content,
+			ToolCallID: message.ToolCallID,
+			ToolCalls:  openAIToolCalls(message.ToolCalls),
+		}
+	}
+	return payload
+}
+
+func decodeOpenAIChatResponse(responseBody []byte) (ChatResponse, error) {
 	var parsed openAIChatResponse
 	if err := json.Unmarshal(responseBody, &parsed); err != nil {
 		return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
@@ -183,6 +197,7 @@ type openAIChatRequest struct {
 	Model    string           `json:"model"`
 	Messages []openAIMessage  `json:"messages"`
 	Tools    []openAIToolSpec `json:"tools,omitempty"`
+	Stream   bool             `json:"stream,omitempty"`
 }
 
 type openAIChatResponse struct {

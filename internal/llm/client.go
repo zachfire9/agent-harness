@@ -61,6 +61,15 @@ type ChatClient interface {
 	Chat(ctx context.Context, request ChatRequest) (ChatResponse, error)
 }
 
+// StreamingChatClient is a ChatClient that can also deliver assistant text as
+// the model generates it. ChatStream calls onText with each text fragment, in
+// order, and returns the same complete response Chat would: the full message
+// text plus any tool calls, which are only returned once fully assembled.
+type StreamingChatClient interface {
+	ChatClient
+	ChatStream(ctx context.Context, request ChatRequest, onText func(text string)) (ChatResponse, error)
+}
+
 // NewChatRequest builds a chat request while copying messages so callers cannot
 // mutate the request by changing their original slice after construction.
 func NewChatRequest(model string, messages ...Message) ChatRequest {

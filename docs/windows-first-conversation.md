@@ -68,6 +68,8 @@ Use search_files to search for TODO and list the two tasks.
 
 The built-ins are `echo`, `list_files`, `read_file`, `search_files`, and restricted `run_command`. No general file-edit, browser, or desktop-control tool is provided. File tools constrain paths, block selected sensitive names (including `.env`), and cap output, but are not perfect secret filtering or full OS isolation. Use only safe sample data.
 
+Replies appear as they are written. Press **Ctrl+C** while a reply is still appearing to stop just that reply; chat keeps running. At the `You:` prompt, Ctrl+C exits.
+
 **You approve every command.** Model-supplied `confirm:true` is not human approval, so when the model wants to run a command, chat shows `The agent wants to run: <command>` and `Allow? [y/N]:`. Type `y` to run it; anything else declines and the agent continues without the output. The enforced exact-command allowlist on Windows is `git status`, `git status --short`, `git diff`, and `go test ./...`, with no shell and a timeout. These need external programs (Git and Go); `pwd` is not offered on Windows because PowerShell's `pwd` is an alias, not an executable. `go test` executes repository code. Skip command examples on the beginner path.
 
 ## 4. Return later or choose another project

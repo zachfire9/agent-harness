@@ -25,6 +25,27 @@ type Runner struct {
 	maxSteps       int
 	contextManager ContextManager
 	vectorStore    vectorstore.Store
+	textStream     *TextStream
+}
+
+// TextStream receives assistant text while a turn runs, for live display.
+//
+// Text is called with each fragment of one model call's text, in order. End is
+// called once after that model call finishes, only if Text was called for it,
+// so a display can end the line before any tool runs. Text from model calls
+// that also request tools (for example "Let me check.") is included.
+type TextStream struct {
+	Text func(text string)
+	End  func()
+}
+
+// WithTextStream returns a copy of the runner that reports assistant text to
+// stream as it is generated. Streaming-capable clients deliver fragments as
+// they arrive; other clients deliver each model call's whole text at once.
+// The Result is the same with or without a stream.
+func (r Runner) WithTextStream(stream TextStream) Runner {
+	r.textStream = &stream
+	return r
 }
 
 // Result contains the final answer and complete message history for a run.
@@ -170,7 +191,7 @@ func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summa
 			ToolCount:      len(toolSpecs),
 		})
 
-		response, err := r.chatClient.Chat(ctx, request)
+		response, err := r.chat(ctx, request)
 		if err != nil {
 			return Result{}, fmt.Errorf("chat failed: %w", err)
 		}
@@ -212,6 +233,37 @@ func (r Runner) RunWithSummary(ctx context.Context, history []llm.Message, summa
 	}
 
 	return Result{}, fmt.Errorf("max agent steps exceeded: %d", r.maxSteps)
+}
+
+// chat makes one model call, streaming its text to r.textStream when set.
+func (r Runner) chat(ctx context.Context, request llm.ChatRequest) (llm.ChatResponse, error) {
+	if r.textStream == nil {
+		return r.chatClient.Chat(ctx, request)
+	}
+	wrote := false
+	onText := func(text string) {
+		if text == "" {
+			return
+		}
+		wrote = true
+		if r.textStream.Text != nil {
+			r.textStream.Text(text)
+		}
+	}
+	defer func() {
+		if wrote && r.textStream.End != nil {
+			r.textStream.End()
+		}
+	}()
+
+	if streaming, ok := r.chatClient.(llm.StreamingChatClient); ok {
+		return streaming.ChatStream(ctx, request, onText)
+	}
+	response, err := r.chatClient.Chat(ctx, request)
+	if err == nil {
+		onText(response.Message.Content)
+	}
+	return response, err
 }
 
 func toolSpecsFromRegistry(registry tools.Registry) []llm.ToolSpec {
