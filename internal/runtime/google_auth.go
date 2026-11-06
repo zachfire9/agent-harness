@@ -250,7 +250,7 @@ func readGoogleOAuthClientCredentials(path string) (googleOAuthClientCredentials
 
 func refreshGoogleAccessToken(ctx context.Context, client *http.Client, tokenEndpoint string, creds googleOAuthClientCredentials, refreshToken string) (googleOAuthRefreshResponse, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultGoogleHTTPClient()
 	}
 	if strings.TrimSpace(tokenEndpoint) == "" {
 		tokenEndpoint = defaultGoogleOAuthTokenEndpoint

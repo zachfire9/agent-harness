@@ -46,7 +46,7 @@ func (n gmailNotifier) Send(ctx context.Context, message Message) error {
 	}
 	client := n.client
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultGoogleHTTPClient()
 	}
 	token, err := EnsureGoogleAccessToken(ctx, n.paths, n.google, client, n.oauthEndpoint, time.Minute)
 	if err != nil {

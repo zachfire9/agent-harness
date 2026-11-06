@@ -9,7 +9,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// DefaultRequestTimeout bounds one chat completion round trip, including
+// reading the response body. It is generous because reasoning models can take
+// minutes, but finite so a stalled connection cannot hang chat, ask, or a
+// background job forever (http.DefaultClient has no timeout).
+const DefaultRequestTimeout = 5 * time.Minute
 
 // OpenAIClient calls an OpenAI-compatible chat completions API.
 type OpenAIClient struct {
@@ -23,8 +30,15 @@ func NewOpenAIClient(baseURL string, apiKey string) *OpenAIClient {
 	return &OpenAIClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		apiKey:     apiKey,
-		httpClient: http.DefaultClient,
+		httpClient: &http.Client{Timeout: DefaultRequestTimeout},
 	}
+}
+
+// WithTimeout returns a copy of the client whose requests time out after d.
+func (c *OpenAIClient) WithTimeout(d time.Duration) *OpenAIClient {
+	copied := *c
+	copied.httpClient = &http.Client{Timeout: d}
+	return &copied
 }
 
 // Chat sends one chat completions request and returns the first assistant message.

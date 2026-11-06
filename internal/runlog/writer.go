@@ -43,7 +43,9 @@ func NewWriter(dir string, enabled bool, secrets []string) (*Writer, error) {
 	if strings.TrimSpace(dir) == "" {
 		dir = filepath.Join(".agent-harness", "runs")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// Run logs hold conversation content; the files are 0600 and a newly created
+	// directory is owner-only. An existing, user-chosen directory is left as is.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create run log dir: %w", err)
 	}
 

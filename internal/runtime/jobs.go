@@ -55,15 +55,12 @@ func WriteJobs(path string, jobs JobsState) error {
 	if jobs.Jobs == nil {
 		jobs.Jobs = map[string]JobState{}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(jobs, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	return writePrivateFile(path, data)
 }
 
 type Job interface {
@@ -124,10 +121,7 @@ func (localCheckinJob) Run(paths Paths, now time.Time, cfg JobConfig) (JobState,
 	}
 	data = append(data, '\n')
 	absPath := filepath.Join(paths.Home, filepath.FromSlash(outputPath))
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return JobState{OutputPath: outputPath}, err
-	}
-	file, err := os.OpenFile(absPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	file, err := openPrivateAppend(absPath)
 	if err != nil {
 		return JobState{OutputPath: outputPath}, err
 	}
@@ -549,10 +543,7 @@ func (n fileOutboxNotifier) Send(ctx context.Context, message Message) error {
 	}
 	data = append(data, '\n')
 	absPath := filepath.Join(n.paths.Home, filepath.FromSlash(n.outboxPath))
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(absPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	file, err := openPrivateAppend(absPath)
 	if err != nil {
 		return err
 	}

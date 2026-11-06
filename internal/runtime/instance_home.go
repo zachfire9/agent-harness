@@ -17,18 +17,19 @@ jobs:
 // InitInstance creates the self-contained directory tree for an instance.
 func InitInstance(paths Paths) error {
 	for _, dir := range []string{paths.Home, paths.ConfigDir, paths.StateDir, paths.CacheDir, paths.WorkDir, paths.LogDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := ensurePrivateDir(dir); err != nil {
 			return err
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(paths.ConfigDir, "secrets"), 0o700); err != nil {
+	if err := ensurePrivateDir(filepath.Join(paths.ConfigDir, "secrets")); err != nil {
 		return err
 	}
 	configPath := filepath.Join(paths.ConfigDir, "config.yaml")
 	if _, err := os.Stat(configPath); err == nil {
-		return nil
+		// Never rewrite an existing config; only tighten its mode.
+		return os.Chmod(configPath, privateFileMode)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(configPath, []byte(starterConfig), 0o644)
+	return writePrivateFile(configPath, []byte(starterConfig))
 }

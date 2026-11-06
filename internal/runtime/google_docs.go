@@ -43,7 +43,7 @@ type googleDocsTextRun struct {
 }
 
 func ReadGoogleDocSource(ctx context.Context, paths Paths, cfg RuntimeConfig, alias string) (GoogleDocSource, error) {
-	return readGoogleDocSourceWithClient(ctx, paths, cfg, alias, http.DefaultClient, defaultGoogleDocsAPIEndpoint, defaultGoogleOAuthTokenEndpoint)
+	return readGoogleDocSourceWithClient(ctx, paths, cfg, alias, defaultGoogleHTTPClient(), defaultGoogleDocsAPIEndpoint, defaultGoogleOAuthTokenEndpoint)
 }
 
 func readGoogleDocSourceWithClient(ctx context.Context, paths Paths, cfg RuntimeConfig, alias string, client *http.Client, docsEndpoint string, oauthEndpoint string) (GoogleDocSource, error) {
@@ -53,7 +53,7 @@ func readGoogleDocSourceWithClient(ctx context.Context, paths Paths, cfg Runtime
 		return GoogleDocSource{}, fmt.Errorf("unknown google docs source %q", alias)
 	}
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultGoogleHTTPClient()
 	}
 	if strings.TrimSpace(docsEndpoint) == "" {
 		docsEndpoint = defaultGoogleDocsAPIEndpoint

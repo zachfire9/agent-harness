@@ -3,7 +3,6 @@ package runtime
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -35,15 +34,12 @@ type Status struct {
 }
 
 func WriteStatus(path string, status Status) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(status, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	return writePrivateFile(path, data)
 }
 
 func ReadStatus(path string) (Status, error) {
