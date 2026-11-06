@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keep the pinned action commit SHAs in .github/workflows current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # The module has no third-party dependencies today; this watches go.mod so
+  # any future dependency gets update PRs automatically.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
