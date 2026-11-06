@@ -451,6 +451,10 @@ When both `scopes` and `scope_profile` are present, `scopes` takes precedence. T
 
 `agent-harness init` creates `config/secrets/` with restricted directory permissions. Store Google client credentials and token files there with `0600` file permissions. These files are local secrets and must not be committed.
 
+Every other runtime file under the instance home is owner-only too, because status, job output, the notification outbox, and progress cursors can contain generated email bodies, document excerpts, and account metadata. On Linux and macOS, instance directories are `0700` and these files are `0600`. Files and directories left more open by an older release are tightened the next time they are written (and when `init` runs); an existing `config.yaml` is never rewritten, only its mode is tightened. On Windows, privacy comes from the per-user `%LOCALAPPDATA%` ACLs that the instance home inherits.
+
+Outbound requests are bounded: Google OAuth, Docs, and Gmail calls time out after 30 seconds, and OpenAI-compatible model calls after 5 minutes, so a stalled connection cannot hang a scheduled job.
+
 Inspect Google auth state without printing token values:
 
 ```bash
