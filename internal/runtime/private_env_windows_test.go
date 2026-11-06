@@ -51,12 +51,17 @@ func setEnvironmentFixturePrivacy(t *testing.T, path string, private bool) {
 Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $acl = Microsoft.PowerShell.Security\Get-Acl -LiteralPath $env:AGENT_HARNESS_ACL_PATH
-$acl.SetSecurityDescriptorSddlForm('O:' + $sid + 'D:P(A;;FA;;;' + $sid + ')')
+# Mark only the owner and DACL as modified. The single-argument overload marks
+# every section, including the SACL, and writing a SACL needs SeSecurityPrivilege
+# (administrators only), so the fixture failed for non-elevated developers.
+$acl.SetSecurityDescriptorSddlForm('O:' + $sid + 'D:P(A;;FA;;;' + $sid + ')', [System.Security.AccessControl.AccessControlSections]'Owner, Access')
 if ($env:AGENT_HARNESS_TEST_BROAD -eq '1') {
  $rule = [System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow')
  $acl.AddAccessRule($rule)
 }
-Microsoft.PowerShell.Security\Set-Acl -LiteralPath $env:AGENT_HARNESS_ACL_PATH -AclObject $acl
+# Set-Acl writes every section regardless of what changed; File.SetAccessControl
+# persists only the sections marked modified above.
+[System.IO.File]::SetAccessControl($env:AGENT_HARNESS_ACL_PATH, $acl)
 `
 	broad := "0"
 	if !private {

@@ -3,6 +3,7 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -10,10 +11,24 @@ import (
 	"github.com/zachfire9/agent-harness/internal/tools"
 )
 
-func TestRunCommandToolExecutesAllowedConfirmedCommand(t *testing.T) {
-	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "pwd"}}, time.Second)
+// nativeCommand is a harmless command present on a stock install of each OS:
+// pwd is not a native Windows executable, but whoami ships in System32.
+func nativeCommand() string {
+	if runtime.GOOS == "windows" {
+		return "whoami"
+	}
+	return "pwd"
+}
 
-	got, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"pwd","confirm":true}`))
+func TestRunCommandToolExecutesAllowedConfirmedCommand(t *testing.T) {
+	command := nativeCommand()
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: command}}, time.Second)
+
+	args, err := json.Marshal(map[string]any{"command": command, "confirm": true})
+	if err != nil {
+		t.Fatalf("encode args: %v", err)
+	}
+	got, err := tool.Execute(context.Background(), json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("execute run_command: %v", err)
 	}

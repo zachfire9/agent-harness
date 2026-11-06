@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -187,6 +188,12 @@ func TestRunConfigCheckReturnsInvalidConfigError(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
 	t.Setenv("OPENAI_API_KEY", "")
+	// config check also reads saved setup settings from os.UserConfigDir; point
+	// every platform's user config location at the temp dir so a developer's
+	// real setup (and its Credential Manager key) can't make this config valid.
+	t.Setenv("APPDATA", root)
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
 
 	stdout, stderr, exitCode := runCLI("agent-harness", "config", "check")
 
@@ -435,6 +442,11 @@ func TestRunToolCommandExecutesEchoTool(t *testing.T) {
 }
 
 func TestRunToolCommandCanExecuteGatedAllowedCommand(t *testing.T) {
+	// pwd is in the default allowlist but is not a native Windows command; it is
+	// only available there when Git Bash's tools are on PATH (as in CI).
+	if _, err := exec.LookPath("pwd"); err != nil {
+		t.Skip("pwd is not on PATH; default allowlisted command cannot run here")
+	}
 	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "run_command", `{"command":"pwd","confirm":true}`)
 
 	if exitCode != 0 {
