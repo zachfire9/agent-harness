@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -227,7 +228,22 @@ func (t SearchFilesTool) Execute(ctx context.Context, args json.RawMessage) (str
 		if isBlockedWorkspacePath(filepath.ToSlash(rel)) {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		readPath := path
+		if entry.Type()&fs.ModeSymlink != 0 {
+			// os.ReadFile follows symlinks, so apply the same sandbox checks as
+			// read_file to the link target and skip anything that escapes the
+			// workspace, is blocked, or is not a regular file.
+			_, target, err := t.resolve(rel)
+			if err != nil || t.ensureAllowed(target, rel) != nil {
+				return nil
+			}
+			info, err := os.Stat(target)
+			if err != nil || !info.Mode().IsRegular() {
+				return nil
+			}
+			readPath = target
+		}
+		data, err := os.ReadFile(readPath)
 		if err != nil {
 			return err
 		}
@@ -316,8 +332,12 @@ func (t workspaceTool) ensureAllowed(target string, displayPath string) error {
 	return nil
 }
 
+// isBlockedWorkspacePath reports whether a workspace-relative path is a
+// sensitive location the file tools must never list, read, or search.
+// Matching is case-insensitive because Windows and macOS filesystems are, and
+// blocking an unusual spelling on a case-sensitive filesystem fails closed.
 func isBlockedWorkspacePath(relativePath string) bool {
-	relativePath = filepath.ToSlash(filepath.Clean(relativePath))
+	relativePath = strings.ToLower(filepath.ToSlash(filepath.Clean(relativePath)))
 	if relativePath == "." {
 		return false
 	}
@@ -326,8 +346,24 @@ func isBlockedWorkspacePath(relativePath string) bool {
 	case ".git", ".agent-harness":
 		return true
 	}
-	base := filepath.Base(relativePath)
-	return base == ".env" || strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".key")
+	return isSensitiveFileName(path.Base(relativePath))
+}
+
+// isSensitiveFileName matches lower-cased base names of local secret files:
+// .env and its .env.<suffix> variants (.env.local, .env.production, ...),
+// except well-known placeholder templates, plus private key material.
+func isSensitiveFileName(base string) bool {
+	// Windows ignores trailing dots and spaces in file names, so ".env." and
+	// ".env " name the same file as ".env".
+	base = strings.TrimRight(base, ". ")
+	switch base {
+	case ".env.example", ".env.sample", ".env.template":
+		return false
+	}
+	if base == ".env" || strings.HasPrefix(base, ".env.") {
+		return true
+	}
+	return strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".key")
 }
 
 func ensureInsideWorkspace(root string, target string, displayPath string) error {
