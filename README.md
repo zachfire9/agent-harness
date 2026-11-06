@@ -257,7 +257,7 @@ go run ./cmd/agent-harness tool read_file '{"path":"README.md"}'
 go run ./cmd/agent-harness tool search_files '{"query":"agent","path":"."}'
 ```
 
-The workspace root is the directory where you run `agent-harness`. File tools reject `..` traversal and absolute paths outside that workspace, skip sensitive local files such as `.env` and `.git`, and cap long outputs with an explicit truncation notice.
+The workspace root is the directory where you run `agent-harness`. File tools reject `..` traversal and absolute paths outside that workspace, resolve symlinks and refuse targets outside it (`search_files` skips such links rather than following them), skip sensitive local files, and cap long outputs with an explicit truncation notice. Sensitive files are matched case-insensitively and include `.git/`, `.agent-harness/`, `.env` and its `.env.*` variants such as `.env.local` (placeholder templates `.env.example`, `.env.sample`, and `.env.template` stay readable), and `*.pem`/`*.key` files.
 
 Debug the gated command tool with an exact allowlisted command and explicit confirmation:
 
@@ -265,7 +265,7 @@ Debug the gated command tool with an exact allowlisted command and explicit conf
 go run ./cmd/agent-harness tool run_command '{"command":"pwd","confirm":true}'
 ```
 
-The initial allowlist is intentionally small: `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`. The tool exposes that allowlist to the model as a JSON-schema enum, supports optional per-command descriptions for custom/local software, rejects commands outside that exact allowlist, rejects calls without `confirm:true`, runs without a shell, enforces a timeout, and returns JSON containing `command`, `exit_code`, `stdout`, and `stderr`.
+The initial allowlist is intentionally small: `pwd` (Linux/macOS only), `git status`, `git status --short`, `git diff`, and `go test ./...`. Because commands run without a shell, `pwd` is left out on Windows, where it exists only as a PowerShell alias or shell built-in. The tool exposes that allowlist to the model as a JSON-schema enum, supports optional per-command descriptions for custom/local software, rejects commands outside that exact allowlist, rejects calls without `confirm:true`, runs without a shell, enforces a timeout, and returns JSON containing `command`, `exit_code`, `stdout`, and `stderr`.
 
 ## Core architecture
 

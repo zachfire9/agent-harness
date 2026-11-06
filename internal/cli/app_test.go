@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -442,10 +441,8 @@ func TestRunToolCommandExecutesEchoTool(t *testing.T) {
 }
 
 func TestRunToolCommandCanExecuteGatedAllowedCommand(t *testing.T) {
-	// pwd is in the default allowlist but is not a native Windows command; it is
-	// only available there when Git Bash's tools are on PATH (as in CI).
-	if _, err := exec.LookPath("pwd"); err != nil {
-		t.Skip("pwd is not on PATH; default allowlisted command cannot run here")
+	if runtime.GOOS == "windows" {
+		t.Skip("pwd is not in the Windows default allowlist; see TestRunToolCommandWindowsDefaultsOmitPwd")
 	}
 	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "run_command", `{"command":"pwd","confirm":true}`)
 
@@ -454,6 +451,20 @@ func TestRunToolCommandCanExecuteGatedAllowedCommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout, `"exit_code":0`) || !strings.Contains(stdout, `"stdout"`) {
 		t.Fatalf("expected command result JSON, got stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestRunToolCommandWindowsDefaultsOmitPwd(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only default allowlist behavior")
+	}
+	stdout, stderr, exitCode := runCLI("agent-harness", "tool", "run_command", `{"command":"pwd","confirm":true}`)
+
+	if exitCode == 0 {
+		t.Fatalf("expected pwd to be rejected on Windows, got stdout=%q", stdout)
+	}
+	if !strings.Contains(stderr, "command is not allowed: pwd") {
+		t.Fatalf("expected allowlist rejection, got %q", stderr)
 	}
 }
 

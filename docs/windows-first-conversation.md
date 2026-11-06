@@ -68,7 +68,7 @@ Use search_files to search for TODO and list the two tasks.
 
 The built-ins are `echo`, `list_files`, `read_file`, `search_files`, and restricted `run_command`. No general file-edit, browser, or desktop-control tool is provided. File tools constrain paths, block selected sensitive names (including `.env`), and cap output, but are not perfect secret filtering or full OS isolation. Use only safe sample data.
 
-**There is no human approval dialog for command calls.** Model-supplied `confirm:true` is not human approval. The enforced exact-command allowlist is `pwd`, `git status`, `git status --short`, `git diff`, and `go test ./...`, with no shell and a timeout. These need external programs; PowerShell's `pwd` alias is not a `pwd` executable. `go test` executes repository code. Skip command examples on the beginner path.
+**There is no human approval dialog for command calls.** Model-supplied `confirm:true` is not human approval. The enforced exact-command allowlist on Windows is `git status`, `git status --short`, `git diff`, and `go test ./...`, with no shell and a timeout. These need external programs (Git and Go); `pwd` is not offered on Windows because PowerShell's `pwd` is an alias, not an executable. `go test` executes repository code. Skip command examples on the beginner path.
 
 ## 4. Return later or choose another project
 

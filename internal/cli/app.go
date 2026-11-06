@@ -968,11 +968,17 @@ func builtInTools() (tools.Registry, error) {
 }
 
 func defaultAllowedCommands() []tools.AllowedCommand {
-	return []tools.AllowedCommand{
-		{Command: "pwd", Description: "Print the current working directory"},
+	commands := []tools.AllowedCommand{
 		{Command: "git status", Description: "Show repository status"},
 		{Command: "git status --short", Description: "Show concise repository status"},
 		{Command: "git diff", Description: "Show unstaged changes"},
 		{Command: "go test ./...", Description: "Run all Go tests in the module"},
 	}
+	// run_command executes programs directly, never through a shell. pwd is a
+	// program on Unix-like systems but only a shell built-in/alias on Windows,
+	// so offering it there would advertise a command that always fails.
+	if goruntime.GOOS != "windows" {
+		commands = append([]tools.AllowedCommand{{Command: "pwd", Description: "Print the current working directory"}}, commands...)
+	}
+	return commands
 }
