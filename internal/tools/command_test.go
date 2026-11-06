@@ -127,3 +127,66 @@ func TestRunCommandToolSchemaDeclaresConfirmation(t *testing.T) {
 		t.Fatalf("expected description to mention confirmation, got %q", tool.Description())
 	}
 }
+
+func TestRunCommandToolDeclinedByApproverDoesNotRun(t *testing.T) {
+	// If this ran, exec would fail with "executable file not found".
+	const missing = "agent-harness-test-missing-binary"
+	var asked []string
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: missing}}, time.Second).
+		WithApprover(tools.CommandApproverFunc(func(_ context.Context, command string) (bool, string) {
+			asked = append(asked, command)
+			return false, "the user declined to run this command"
+		}))
+
+	got, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"`+missing+`","confirm":true}`))
+	if err != nil {
+		t.Fatalf("a declined command must be a tool result, not an error: %v", err)
+	}
+	var result struct {
+		Command  string `json:"command"`
+		Approved bool   `json:"approved"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(got), &result); err != nil {
+		t.Fatalf("decode declined result %q: %v", got, err)
+	}
+	if result.Approved || result.Command != missing || result.Reason != "the user declined to run this command" {
+		t.Fatalf("unexpected declined result %+v", result)
+	}
+	if strings.Join(asked, ",") != missing {
+		t.Fatalf("expected approver to be asked once about %q, got %q", missing, asked)
+	}
+}
+
+func TestRunCommandToolApproverIsNotAskedAboutRejectedCalls(t *testing.T) {
+	asked := 0
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: "pwd"}}, time.Second).
+		WithApprover(tools.CommandApproverFunc(func(context.Context, string) (bool, string) {
+			asked++
+			return true, ""
+		}))
+
+	for _, args := range []string{`{"command":"pwd"}`, `{"command":"rm -rf /","confirm":true}`} {
+		if _, err := tool.Execute(context.Background(), json.RawMessage(args)); err == nil {
+			t.Fatalf("expected %s to be rejected before approval", args)
+		}
+	}
+	if asked != 0 {
+		t.Fatalf("person must not be asked about unconfirmed or non-allowlisted commands; asked %d times", asked)
+	}
+}
+
+func TestRunCommandToolApprovedByApproverRuns(t *testing.T) {
+	command := nativeCommand()
+	tool := tools.NewRunCommandTool([]tools.AllowedCommand{{Command: command}}, time.Second).
+		WithApprover(tools.CommandApproverFunc(func(context.Context, string) (bool, string) { return true, "" }))
+
+	args, _ := json.Marshal(map[string]any{"command": command, "confirm": true})
+	got, err := tool.Execute(context.Background(), json.RawMessage(args))
+	if err != nil {
+		t.Fatalf("execute approved command: %v", err)
+	}
+	if !strings.Contains(got, `"exit_code":0`) {
+		t.Fatalf("expected approved command to run, got %q", got)
+	}
+}

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -42,6 +41,7 @@ type App struct {
 	runLogSecretList    []string
 	vectorStore         vectorstore.Store
 	vectorStoreProvider string
+	interactive         *bool // nil: detect from stdin; set by WithInteractiveInput
 }
 
 // NewApp creates a CLI app with an injected chat client and model.
@@ -778,6 +778,7 @@ func writeServiceHints(stdout io.Writer, instance, goos string) {
 
 func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int {
 	traceEnabled, promptArgs := parseTraceFlag(promptArgs)
+	autoApprove, promptArgs := parseApproveCommandsFlag(promptArgs)
 	prompt := strings.TrimSpace(strings.Join(promptArgs, " "))
 	if prompt == "" {
 		fmt.Fprintln(stderr, "ask requires a prompt")
@@ -796,7 +797,13 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 	defer logger.Close()
 	writeRunStart(logger, prompt)
 
-	registry, err := builtInTools()
+	// ask takes its prompt from arguments, so stdin is used only for approvals.
+	stdin := a.stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	approver := commandApprover(autoApprove, a.inputIsTerminal(stdin), newLineInput(stdin), stderr)
+	registry, err := builtInTools(approver)
 	if err != nil {
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
@@ -820,7 +827,8 @@ func (a App) runAsk(promptArgs []string, stdout io.Writer, stderr io.Writer) int
 }
 
 func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
-	traceEnabled, _ := parseTraceFlag(args)
+	traceEnabled, args := parseTraceFlag(args)
+	autoApprove, _ := parseApproveCommandsFlag(args)
 	if a.chatClient == nil {
 		fmt.Fprintln(stderr, "chat requires a chat client")
 		return 1
@@ -830,7 +838,8 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 	if stdin == nil {
 		stdin = os.Stdin
 	}
-	registry, err := builtInTools()
+	input := newLineInput(stdin)
+	registry, err := builtInTools(commandApprover(autoApprove, a.inputIsTerminal(stdin), input, stderr))
 	if err != nil {
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
@@ -843,15 +852,15 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 	defer logger.Close()
 	_ = logger.Write(runlog.Event{Type: "session.start"})
 	runner := agent.NewWithToolsContextLimitsSummarizerAndVectorStore(a.chatClient, a.model, registry, a.contextLimits, a.summarizer, a.vectorStore)
-	scanner := bufio.NewScanner(stdin)
 	var history []llm.Message
 	var summary agent.ConversationSummary
 	var pendingSummary *summaryJob
 
 	for {
 		fmt.Fprint(stdout, "You: ")
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
+		line, ok, err := input.ReadLine()
+		if !ok {
+			if err != nil {
 				fmt.Fprintf(stderr, "chat input failed: %v\n", err)
 				return 1
 			}
@@ -859,7 +868,7 @@ func (a App) runChat(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 0
 		}
 
-		prompt := strings.TrimSpace(scanner.Text())
+		prompt := strings.TrimSpace(line)
 		if shouldExitChat(prompt) {
 			fmt.Fprintln(stdout, "Goodbye.")
 			return 0
@@ -924,7 +933,8 @@ func (a App) runTool(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	registry, err := builtInTools()
+	// The person typed this command themselves, so no second approval prompt.
+	registry, err := builtInTools(nil)
 	if err != nil {
 		fmt.Fprintf(stderr, "tool registry error: %v\n", err)
 		return 1
@@ -947,7 +957,9 @@ func (a App) runTool(args []string, stdout io.Writer, stderr io.Writer) int {
 	return 0
 }
 
-func builtInTools() (tools.Registry, error) {
+// builtInTools builds the tool registry. A non-nil approver gates every
+// run_command execution behind a person's approval (see commandApprover).
+func builtInTools(approver tools.CommandApprover) (tools.Registry, error) {
 	registry := tools.NewRegistry()
 	workspaceRoot, err := os.Getwd()
 	if err != nil {
@@ -958,7 +970,7 @@ func builtInTools() (tools.Registry, error) {
 		tools.NewListFilesTool(workspaceRoot, 0),
 		tools.NewReadFileTool(workspaceRoot, 0),
 		tools.NewSearchFilesTool(workspaceRoot, 0),
-		tools.NewRunCommandTool(defaultAllowedCommands(), 0),
+		tools.NewRunCommandTool(defaultAllowedCommands(), 0).WithApprover(approver),
 	} {
 		if err := registry.Register(tool); err != nil {
 			return tools.Registry{}, err
