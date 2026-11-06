@@ -59,7 +59,9 @@ if ($env:AGENT_HARNESS_TEST_BROAD -eq '1') {
  $rule = [System.Security.AccessControl.FileSystemAccessRule]::new([System.Security.Principal.SecurityIdentifier]::new('S-1-1-0'), 'Read', 'Allow')
  $acl.AddAccessRule($rule)
 }
-Microsoft.PowerShell.Security\Set-Acl -LiteralPath $env:AGENT_HARNESS_ACL_PATH -AclObject $acl
+# Set-Acl writes every section regardless of what changed; File.SetAccessControl
+# persists only the sections marked modified above.
+[System.IO.File]::SetAccessControl($env:AGENT_HARNESS_ACL_PATH, $acl)
 `
 	broad := "0"
 	if !private {
