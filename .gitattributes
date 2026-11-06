@@ -1,0 +1,5 @@
+# Store text files with LF line endings in the repository and check them out
+# as LF on every platform. Go, shell scripts, YAML, Markdown and PowerShell all
+# work with LF, and a single rule keeps Windows editors from producing
+# whole-file line-ending diffs.
+* text=auto eol=lf
